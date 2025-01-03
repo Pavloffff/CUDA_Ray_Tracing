@@ -112,6 +112,58 @@ public:
     __host__ __device__ virtual ~Polygon() {}
 };
 
+class Point : public Polygon {
+public:
+    double3 a;
+    double radius = 0.05;
+
+    __host__ __device__ Point(const double3 &A) {
+        a = A;
+    }
+
+    __host__ __device__ uchar4 at(double3 P = {0, 0, 0}) const override {
+        return {255, 255, 255, 255};
+    }
+
+    __host__ __device__ bool intersect(const double3 &pos, const double3 &dir, double &tOut) const override {
+        /**
+         * Идея:
+         * - Вычислить проекцию точки `a` на луч `pos + t * dir`.
+         * - Найти расстояние от точки `a` до этой проекции.
+         * - Если расстояние меньше или равно радиусу, то пересечение есть.
+         */
+
+        // Вектор от начала луча к точке
+        double3 L = diff(a, pos);
+
+        // Проекция точки на направление луча
+        double t = dot(L, dir) / dot(dir, dir);
+
+        if (t < 0.0) {
+            // Точка находится "позади" начала луча
+            return false;
+        }
+
+        // Вычислим ближайшую точку на луче к точке a
+        double3 closest_point = add(pos, prod_num(dir, t));
+
+        // Вычислим расстояние между точкой a и ближайшей точкой на луче
+        double distance_squared = dot(diff(a, closest_point), diff(a, closest_point));
+
+        if (distance_squared <= radius * radius) {
+            tOut = t; // Сохраняем расстояние до точки пересечения
+            return true; // Луч проходит в радиусе точки
+        }
+
+        return false; // Пересечения нет
+    }
+
+    __host__ __device__ double3 normal() const override {
+       
+        return {0.0, 0.0, 0.0};
+    }
+};
+
 class Trig : public Polygon {
 public:
     double3 a, b, c;
@@ -119,8 +171,10 @@ public:
     __host__ __device__ Trig(const double3 &A, const double3 &B, const double3 &C, uchar4 col) {
         a = A;  b = B;  c = C;
         color = col;
-        r = 0.2;
+        r = 0.4;
         tr = 0.6;
+        // r = 0.2;
+        // tr = 0.1;
     }
 
     __host__ __device__ uchar4 at(double3 P = {0, 0, 0}) const override {
@@ -269,7 +323,7 @@ __host__ __device__ double3 transform_figure(const double3 &v, double scale, dou
     };
 };
 
-__host__ __device__ double3 *build_space(Polygon **polygons, uchar4 *floor_tex, 
+double3 *build_space(Polygon **polygons, uchar4 *floor_tex, 
                                                 int w, int h, int cnt_lights_on_edge) {
     polygons[0] = new Rect(
         double3{-5, -5, 0}, 
@@ -305,82 +359,96 @@ __host__ __device__ double3 *build_space(Polygon **polygons, uchar4 *floor_tex,
     polygons[6] = new Trig(oct_V1, oct_V3, oct_V4, oct_color);
     polygons[7] = new Trig(oct_V1, oct_V5, oct_V3, oct_color);
     polygons[8] = new Trig(oct_V1, oct_V2, oct_V5, oct_color);
+    int total_points = 1;
+    double3 *center_points = new double3[total_points];
+    double3 oct_point = oct_V0;
+    oct_point = add(oct_point, oct_V1);
+    oct_point = add(oct_point, oct_V2);
+    oct_point = add(oct_point, oct_V3);
+    oct_point = add(oct_point, oct_V4);
+    oct_point = add(oct_point, oct_V5);
+    oct_point = prod_num(oct_point, 1.0/6);
+    center_points[0] = oct_point;
 
-    int num_triangles = 8;
-    int num_edges_per_triangle = 3;
-    int total_points = num_triangles * num_edges_per_triangle * cnt_lights_on_edge;
-    double3 *edge_points = nullptr;
-    if (cnt_lights_on_edge > 0) {
-        edge_points = new double3[total_points];
-        int write_idx = 0;
-        for (int i = 1; i <= 8; i++) {
-            Trig *triangle = static_cast<Trig*>(polygons[i]);
-            double3 vA = triangle->a;
-            double3 vB = triangle->b;
-            double3 vC = triangle->c;
-            double3 edges[3][2] = {
-                {vA, vB},
-                {vB, vC},
-                {vC, vA}
-            };
-            double step = 1.0 / (cnt_lights_on_edge + 1);
-            for (int e = 0; e < 3; e++) {
-                double3 p1 = edges[e][0];
-                double3 p2 = edges[e][1];
-                for (int j = 1; j <= cnt_lights_on_edge; j++) {
-                    double t = j * step;
-                    double3 point = lerp(p1, p2, t);
-                    edge_points[write_idx++] = point;
-                }
+    int num_triangles = 8;              // Количество треугольников
+    int num_edges_per_triangle = 3;     // Количество рёбер на треугольник
+    int points_per_edge = 2; // Точек на каждом ребре
+
+    int point_index = 9; // Начинаем добавлять точки после треугольников
+
+    // Цикл по треугольникам
+    for (int i = 1; i <= num_triangles; i++) {
+        Trig *triangle = static_cast<Trig*>(polygons[i]);
+
+        double3 vA = triangle->a;
+        double3 vB = triangle->b;
+        double3 vC = triangle->c;
+
+        // Три ребра: (A->B), (B->C), (C->A)
+        double3 edges[3][2] = {
+            {vA, vB},
+            {vB, vC},
+            {vC, vA}
+        };
+
+        for (int e = 0; e < num_edges_per_triangle; e++) {
+            double3 p1 = edges[e][0];
+            double3 p2 = edges[e][1];
+
+            // Создаём точки на каждом ребре
+            double step = 1.0 / (points_per_edge + 1);
+
+            for (int j = 1; j <= points_per_edge; j++) {
+                double t = j * step;
+                double3 point_position = lerp(p1, p2, t);
+                polygons[point_index++] = new Point(point_position);
             }
         }
     }
 
-    return edge_points;
+    return center_points;
 }
 
-__host__ __device__ void init_lights(Light *lights, double3 *trig_edge_points, int n_trig_edge_points) {
+void init_lights(Light *lights, double3 *trig_center_points, int n_trig_center_points) {
     Light amb;
     amb.type = LightType::AMBIENT;
     amb.intensity = 0.5; 
     lights[0] = amb;
-    for (int i = 1; i <= n_trig_edge_points; i++) {
+    for (int i = 0; i < n_trig_center_points; i++) {
         Light pnt;
         pnt.type = LightType::POINT;
-        pnt.intensity = 0.2;
-        pnt.position = trig_edge_points[i];
-        lights[i] = pnt;
+        pnt.intensity = 0.8;
+        pnt.position = trig_center_points[i];
+        lights[i + 1] = pnt;
     }
     // {
     //     Light pnt;
     //     pnt.type = LightType::POINT;
-    //     pnt.intensity = 0.8;
+    //     pnt.intensity = 10.8;
     //     pnt.position  = {-4.0, 4.0, 3};
     //     lights[1] = pnt;
     // }
     // {
     //     Light pnt;
     //     pnt.type = LightType::POINT;
-    //     pnt.intensity = 1.0;
-    //     pnt.position  = {0.0, 0.0, 0.01};
-    //     lights[2] = pnt;
+    //     pnt.intensity = 10.0;
+    //     pnt.position  = {-1., -1., 1.};
+    //     lights[1] = pnt;
     // }
 }
 
-__host__ __device__ bool closest_intersection(Polygon **polygons, int n_polygons, const double3 &O, 
-               const double3 &D, double t_min, double t_max, int &closest_index, double &closest_t) {
-    closest_t = DBL_MAX;
-    closest_index = -1;
+__host__ __device__ double compute_shadow(Polygon **polygons, int n_polygons, const double3 &O, 
+                                                    const double3 &D, double t_min, double t_max) {
+    double shadow_index = 1.0;
     for (int k = 0; k < n_polygons; k++) {
         double t;
         if (polygons[k]->intersect(O, D, t)) {
-            if (t >= t_min && t <= t_max && t < closest_t) {
-                closest_t = t;
-                closest_index = k;
+            if (t >= t_min && t <= t_max) {
+                shadow_index *= polygons[k]->tr;
             }
         }
     }
-    return (closest_index != -1);
+    return shadow_index;
 }
 
 __host__ __device__ double3 reflect(const double3 &R, const double3 &N) {
@@ -410,22 +478,23 @@ __host__ __device__ double compute_lighting(Polygon **polygons, int n_polygons,
                 t_max = 1e17;
             }
 
-            int shadowIndex;
-            double shadowT;
-            if (closest_intersection(polygons, n_polygons, P, L, 0.001, t_max, shadowIndex, shadowT)) {
-                continue;
-            }
+            // int shadowIndex;
+            double shadowT = compute_shadow(polygons, n_polygons, P, L, 0.001, t_max);
+            // double shadowT = 1.0;
+            // if (closest_intersection(polygons, n_polygons, P, L, 0.001, t_max, shadowIndex, shadowT)) {
+            //     continue;
+            // }
 
             double n_dot_l = dot(N, L);
             if (n_dot_l > 0.0) {
-                i += light.intensity * n_dot_l / ( std::sqrt(dot(N,N)) * std::sqrt(dot(L,L)));
+                i += shadowT * light.intensity * n_dot_l / ( std::sqrt(dot(N,N)) * std::sqrt(dot(L,L)));
             }
 
             if (specular >= 0) {
                 double3 R = reflect(L, N); 
                 double r_dot_v = dot(R, V);
                 if (r_dot_v > 0.0) {
-                    i += light.intensity 
+                    i += shadowT * light.intensity 
                          * std::pow( r_dot_v/(std::sqrt(dot(R,R))*std::sqrt(dot(V,V))), specular);
                 }
             }
@@ -461,18 +530,20 @@ __host__ __device__ double3 refract(const double3& ray_dir, double3& a_normal)
 template<int depth>
 __host__ __device__ uchar4 ray(Polygon **polygons, int n_polygons, Light *lights, int n_lights,
                                          const double3 &pos, const double3 &dir, int max_depth) {
-    const double light_reps = 0.125;
-    for (int k = 0; k < n_lights; k++) {
-        if (lights[k].type == LightType::POINT) {
-            double3 light_dir = diff(lights[k].position, pos);
-            double distance_to_light = std::sqrt(dot(light_dir, light_dir));
-            light_dir = norm(light_dir);
-            if (fabs(dot(light_dir, dir) - 1.0) < light_reps && distance_to_light < light_reps) {
-                return {255, 255, 255, 255};
-            }
-        }
-    }
-
+    // const double light_reps = 0.125;
+    // for (int k = 0; k < n_lights; k++) {
+    //     if (lights[k].type == LightType::POINT) {
+    //         double3 light_dir = diff(lights[k].position, pos);
+    //         double distance_to_light = std::sqrt(dot(light_dir, light_dir));
+    //         light_dir = norm(light_dir);
+    //         if (fabs(dot(light_dir, dir) - 1.0) < light_reps && distance_to_light < light_reps) {
+    //             return {255, 255, 255, 255};
+    //         }
+    //     }
+    // }
+    double wkrejgeirjku;
+    int a = polygons[0]->intersect(pos, dir, wkrejgeirjku);
+    return {255, 0, a, 255};
     int k_min = -1;
     double ts_min = DBL_MAX;
     for (int k = 0; k < n_polygons; k++) {
@@ -519,13 +590,12 @@ __host__ __device__ uchar4 ray(Polygon **polygons, int n_polygons, Light *lights
 }
 
 template<>
-__host__ __device__ uchar4 ray<100>(Polygon **polygons, int n_polygons, Light *lights, int n_lights,
+__host__ __device__ uchar4 ray<2>(Polygon **polygons, int n_polygons, Light *lights, int n_lights,
                                               const double3 &pos, const double3 &dir, int max_depth) {
     return {0, 0, 0, 255};
 }
 
-__host__ __device__ uchar4 ssaa_pixel(const uchar4* big_data, int bigW, int bigH, int x, int y, int k)
-{
+__host__ __device__ uchar4 ssaa_pixel(const uchar4* big_data, int bigW, int bigH, int x, int y, int k) {
     long sumR = 0, sumG = 0, sumB = 0, sumA = 0;
     for (int j = 0; j < k; j++) {
         for (int i = 0; i < k; i++) {
@@ -548,9 +618,54 @@ __host__ __device__ uchar4 ssaa_pixel(const uchar4* big_data, int bigW, int bigH
     return out;
 }
 
+__global__ void ssaa_kernel(uchar4 *big_data, uchar4 *small_data, int bigW, int bigH, int w, int h, int k) {
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
+	int idy = blockDim.y * blockIdx.y + threadIdx.y;
+   	int offsetx = blockDim.x * gridDim.x;
+	int offsety = blockDim.y * gridDim.y;
+    int i, j;
+
+    for (i = idy; i < w; i += offsety) {
+        for (j = idx; j < h; j += offsetx) {
+            small_data[i * w + j] = ssaa_pixel(big_data, bigW, bigH, j, i, k);
+        }
+    }
+}
+
+__global__ void render_kernel(Polygon **polygons, int n_polygons, Light *lights, int n_lights, const double3 &pc,
+                    const double3 &pv, int w, int h, double angle, uchar4 *data, int max_depth) {
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
+	int idy = blockDim.y * blockIdx.y + threadIdx.y;
+   	int offsetx = blockDim.x * gridDim.x;
+	int offsety = blockDim.y * gridDim.y;
+    int i, j;
+    
+    double dw = 2.0 / (w - 1.0);
+    double dh = 2.0 / (h - 1.0);
+    double z  = 1.0 / std::tan(angle * M_PI / 360.0);
+
+    double3 bz = norm(diff(pv, pc));
+    double3 bx = norm(prod(bz, {0.0, 0.0, 1.0}));
+    double3 by = norm(prod(bx, bz));
+    for (i = idy; i < w; i += offsety) {
+        for (j = idx; j < h; j += offsetx) {
+            double3 v = {
+                -1.0 + dw * i,
+                (-1.0 + dh * j) * (double)h / (double)w,
+                z
+            };
+            double3 dir = mult(bx, by, bz, v);
+            dir = norm(dir);
+            data[(h - 1 - j)*w + i] = ray<0>(
+                polygons, n_polygons, lights, n_lights, pc, dir, max_depth
+            );
+        }
+    }
+}
+
 __host__ __device__ void render(Polygon **polygons, int n_polygons, Light *lights, int n_lights, const double3 &pc,
                     const double3 &pv, int w, int h, double angle, uchar4 *data, int max_depth) {
-    double dw = 2.0 / (w - 1.0);    // это вынести в main
+    double dw = 2.0 / (w - 1.0);
     double dh = 2.0 / (h - 1.0);
     double z  = 1.0 / std::tan(angle * M_PI / 360.0);
 
@@ -558,7 +673,7 @@ __host__ __device__ void render(Polygon **polygons, int n_polygons, Light *light
     double3 bx = norm(prod(bz, {0.0, 0.0, 1.0}));
     double3 by = norm(prod(bx, bz));
 
-    for (int i = 0; i < w; i++) {    // Параллелить эти 2 for-а
+    for (int i = 0; i < w; i++) {
         for (int j = 0; j < h; j++) {
             double3 v = {
                 -1.0 + dw * i,
@@ -576,12 +691,11 @@ __host__ __device__ void render(Polygon **polygons, int n_polygons, Light *light
 
 int main(int argc, char const *argv[])
 {
-    int cuda = 0;
+    int cuda = 1;
 
     int frame_cnt = atoi(argv[1]);
     int max_depth = 10;
-
-    int n_polygons = 9;
+    int n_polygons = 57;
     Polygon **polygons = new Polygon*[n_polygons];
     int texW, texH;
    	FILE *fp = fopen("floor.data", "rb");
@@ -591,15 +705,15 @@ int main(int argc, char const *argv[])
     fread(floor_tex, sizeof(uchar4), texW * texH, fp);
     fclose(fp);
 
-    int cnt_lights_on_edge = 1;
-    double3 *trig_edge_points = build_space(polygons, floor_tex, texW, texH, cnt_lights_on_edge);
-    int n_lights = 3 * cnt_lights_on_edge * (n_polygons - 1) + 1;
-    printf("%d\n", n_lights);
+    int cnt_lights_on_center = 1;
+    double3 *trig_center_points = build_space(polygons, floor_tex, texW, texH, cnt_lights_on_center);
+    // int n_lights = 3 * cnt_lights_on_edge * (n_polygons - 1) + 1;
+    int n_lights = 2;
     Light *lights = new Light[n_lights];
-    init_lights(lights, trig_edge_points, n_lights - 1);
-
+    init_lights(lights, trig_center_points, n_lights - 1);
+    // printf("%lf %lf %lf\n", trig_center_points[0].x, trig_center_points[0].y, trig_center_points[0].z);
     int w = 640, h = 480;
-    int k = 3;
+    int k = 1;
     int bigW = w * k;
     int bigH = h * k;
     uchar4 *data_big = (uchar4*)malloc(sizeof(uchar4) * bigW * bigH);
@@ -607,8 +721,28 @@ int main(int argc, char const *argv[])
     double3 pc, pv;
     char buff[256];
     
+    uchar4 *data_big_dev;
+    uchar4 *data_small_dev;
+    Polygon **polygons_dev;
+    // uchar4 *floor_tex_dev;
+    Light *lights_dev;
     if (cuda) {
-
+        CSC(cudaMalloc(&data_big_dev, sizeof(uchar4) * bigW * bigH));
+        CSC(cudaMemcpy(data_big_dev, data_big, sizeof(uchar4) * bigW * bigH, cudaMemcpyHostToDevice));
+        CSC(cudaMalloc(&data_small_dev, sizeof(uchar4) * w * h));
+        CSC(cudaMemcpy(data_small_dev, data_small, sizeof(uchar4) * w * h, cudaMemcpyHostToDevice));
+        CSC(cudaMalloc(&polygons_dev, sizeof(Polygon *) * n_polygons));
+        for (int i = 0; i < n_polygons; i++) {
+            Polygon* temp_dev;
+            CSC(cudaMalloc(&temp_dev, sizeof(Polygon)));
+            CSC(cudaMemcpy(temp_dev, &polygons[i], sizeof(Polygon), cudaMemcpyHostToDevice));
+            CSC(cudaMemcpy(&polygons_dev[i], &temp_dev, sizeof(Polygon*), cudaMemcpyHostToDevice));
+            // CSC(cudaMalloc(&polygons_dev[i], sizeof(Polygon)));
+            // printf("ГОВНО\n");
+            // CSC(cudaMemcpy(polygons_dev[i], polygons[i], sizeof(Polygon), cudaMemcpyHostToDevice));
+        }
+        CSC(cudaMalloc(&lights_dev, sizeof(Light) * n_lights));
+        CSC(cudaMemcpy(lights_dev, lights, sizeof(Light) * n_lights, cudaMemcpyHostToDevice));
     }
 
     for(int idx = 0; idx < frame_cnt; idx++) {
@@ -622,14 +756,29 @@ int main(int argc, char const *argv[])
             3.0 * std::cos(0.05 * idx + M_PI), 
             0.0
         };
-
-        render(polygons, n_polygons, lights, n_lights,
-               pc, pv, bigW, bigH, 120.0, data_big, max_depth);     // вот тут параллелить
-
-        for (int y = 0; y < h; y++) {   // параллелить данные 2 for-а
-            for (int x = 0; x < w; x++) {
-                data_small[y * w + x] = ssaa_pixel(data_big, bigW, bigH, x, y, k);
+        
+        if (cuda) {
+            render_kernel<<<dim3(2, 2), dim3(2, 2)>>>(polygons_dev, n_polygons,
+                lights_dev, n_lights, pc, pv, bigW, bigH, 120.0, data_big_dev, max_depth);
+            printf("%d\n", cudaGetLastError());
+        } else {
+            render(polygons, n_polygons, lights, n_lights,
+                pc, pv, bigW, bigH, 120.0, data_big, max_depth);
+        }
+        // CSC(cudaMemcpy(data_big_dev, data_big, sizeof(uchar4) * bigW * bigH, cudaMemcpyHostToDevice));
+        if (cuda) {
+            ssaa_kernel<<<dim3(2, 2), dim3(2, 2)>>>(data_big_dev, data_small_dev,
+                bigW, bigH, w, h, k);
+        } else {
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    data_small[y * w + x] = ssaa_pixel(data_big, bigW, bigH, x, y, k);
+                }
             }
+        }
+
+        if (cuda) {
+            CSC(cudaMemcpy(data_small, data_small_dev, sizeof(uchar4) * w * h, cudaMemcpyDeviceToHost));
         }
         sprintf(buff, "frames/frame%d.out", idx);
         printf("Generating [%d/%d]: %s\n", idx+1, frame_cnt, buff);
@@ -639,9 +788,19 @@ int main(int argc, char const *argv[])
         fwrite(&h, sizeof(int), 1, out);
         fwrite(data_small, sizeof(uchar4), w*h, out);
         fclose(out);
+        printf("%d\n", cudaGetLastError());
     }
-    
-    free(trig_edge_points);
+
+    if (cuda) {
+        CSC(cudaFree(lights_dev));
+        // for (int i = 0; i < n_polygons; i++) {
+        //     CSC(cudaFree(polygons_dev[i]));
+        // }
+        CSC(cudaFree(polygons_dev));
+        CSC(cudaFree(data_small_dev));
+        CSC(cudaFree(data_big_dev));
+    }
+    free(trig_center_points);
     free(data_big);
     free(data_small);
     free(floor_tex);
