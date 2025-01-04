@@ -1,9 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
-#include <vector>
 #include <memory>
 #include <float.h>
+#include <time.h>
+#include <sys/time.h>
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
@@ -116,11 +118,11 @@ __host__ __device__ struct Trig {
     double tr = 0.0;
 };
 
-__host__ __device__ void trig_init(Trig *trig, double3 A, double3 B, double3 C, uchar4 col) {
+__host__ __device__ void trig_init(Trig *trig, double3 A, double3 B, double3 C, uchar4 col, double r, double tr) {
     trig->a = A; trig->b = B; trig->c = C;
     trig->color = col;
-    trig->r = 0.1;
-    trig->tr = 0.6;
+    trig->r = r;
+    trig->tr = tr;
 }
 
 __host__ __device__ uchar4 trig_at(Trig trig, double3 P = {0, 0, 0}) {
@@ -220,7 +222,7 @@ __host__ __device__ IntersectDto rect_intersect(Rect rect, double3 pos, double3 
 
     {
         Trig t1;
-        trig_init(&t1, rect.a, rect.b, rect.d, rect.color);
+        trig_init(&t1, rect.a, rect.b, rect.d, rect.color, 0.1, 0.6);
         IntersectDto t = trig_intersect(t1, pos, dir);
         if (t.res) {
             if (t.tOut < tMin) {
@@ -231,7 +233,7 @@ __host__ __device__ IntersectDto rect_intersect(Rect rect, double3 pos, double3 
     }
     {
         Trig t2;
-        trig_init(&t2, rect.d, rect.b, rect.c, rect.color);
+        trig_init(&t2, rect.d, rect.b, rect.c, rect.color, 0.1, 0.6);
         IntersectDto t = trig_intersect(t2, pos, dir);
         if (t.res) {
             if (t.tOut < tMin) {
@@ -277,20 +279,39 @@ __host__ __device__ double3 transform_figure(double3 v, double scale, double3 sh
     };
 };
 
-void build_space(Rect *rects, Trig *trigs, uchar4 *floor_tex, int w, int h) {
+struct FigureDto {
+    double3 center;
+    double3 ncolor;
+    uchar4 color;
+    double radius;
+    double r;
+    double tr;
+    int num_points;
+};
+
+struct FloorDto {
+    double3 a;
+    double3 b;
+    double3 c;
+    double3 d;
+    double3 color;
+};
+
+void build_space(Rect *rects, Trig *trigs, uchar4 *floor_tex, int w, int h, FigureDto *figure_data, FloorDto floor_data) {
     rect_init(
         &rects[0],
-        double3{-5, -5, 0}, 
-        double3{ 5, -5, 0},
-        double3{ 5,  5, 0},
-        double3{-5,  5, 0},
+        floor_data.a,
+        floor_data.b,
+        floor_data.c,
+        floor_data.d,
         uchar4{0, 0, 255, 255},
         w,
         h
     );
 
-    double oct_scale = 1.5;
-    double3 oct_shift = {-2.5, 2.5, 2};
+    double oct_radius = 1.5;
+    double oct_scale = figure_data[0].radius / oct_radius;
+    double3 oct_shift = figure_data[0].center;
     double3 oct_v0 = {0, 0, 1};
     double3 oct_v1 = {0, 0,-1};
     double3 oct_v2 = {0, 1, 0};
@@ -303,18 +324,19 @@ void build_space(Rect *rects, Trig *trigs, uchar4 *floor_tex, int w, int h) {
     double3 oct_V3 = transform_figure(oct_v3, oct_scale, oct_shift);
     double3 oct_V4 = transform_figure(oct_v4, oct_scale, oct_shift);
     double3 oct_V5 = transform_figure(oct_v5, oct_scale, oct_shift);
-    uchar4 oct_color = {251, 121, 4, 255};
-    trig_init(&trigs[0], oct_V0, oct_V2, oct_V4, oct_color);
-    trig_init(&trigs[1], oct_V0, oct_V4, oct_V3, oct_color);
-    trig_init(&trigs[2], oct_V0, oct_V3, oct_V5, oct_color);
-    trig_init(&trigs[3], oct_V0, oct_V5, oct_V2, oct_color);
-    trig_init(&trigs[4], oct_V1, oct_V4, oct_V2, oct_color);
-    trig_init(&trigs[5], oct_V1, oct_V3, oct_V4, oct_color);
-    trig_init(&trigs[6], oct_V1, oct_V5, oct_V3, oct_color);
-    trig_init(&trigs[7], oct_V1, oct_V2, oct_V5, oct_color);
+    uchar4 oct_color = figure_data[0].color;
+    trig_init(&trigs[0], oct_V0, oct_V2, oct_V4, oct_color, figure_data[0].r, figure_data[0].tr);
+    trig_init(&trigs[1], oct_V0, oct_V4, oct_V3, oct_color, figure_data[0].r, figure_data[0].tr);
+    trig_init(&trigs[2], oct_V0, oct_V3, oct_V5, oct_color, figure_data[0].r, figure_data[0].tr);
+    trig_init(&trigs[3], oct_V0, oct_V5, oct_V2, oct_color, figure_data[0].r, figure_data[0].tr);
+    trig_init(&trigs[4], oct_V1, oct_V4, oct_V2, oct_color, figure_data[0].r, figure_data[0].tr);
+    trig_init(&trigs[5], oct_V1, oct_V3, oct_V4, oct_color, figure_data[0].r, figure_data[0].tr);
+    trig_init(&trigs[6], oct_V1, oct_V5, oct_V3, oct_color, figure_data[0].r, figure_data[0].tr);
+    trig_init(&trigs[7], oct_V1, oct_V2, oct_V5, oct_color, figure_data[0].r, figure_data[0].tr);
 
-    double dodec_scale = 0.7;
-    double3 dodec_shift = {2.5, 2.5, 2};
+    double dodec_radius = 1.732;
+    double dodec_scale = figure_data[1].radius / dodec_radius;
+    double3 dodec_shift = figure_data[1].center;
     double3 dodec_v0 = {1.0, 1.0, 1.0};
     double3 dodec_v1 = {1.0, 1.0, -1.0};
     double3 dodec_v2 = {1.0, -1.0, 1.0};
@@ -355,83 +377,112 @@ void build_space(Rect *rects, Trig *trigs, uchar4 *floor_tex, int w, int h) {
     double3 dodec_V17 = transform_figure(dodec_v17, dodec_scale, dodec_shift);
     double3 dodec_V18 = transform_figure(dodec_v18, dodec_scale, dodec_shift);
     double3 dodec_V19 = transform_figure(dodec_v19, dodec_scale, dodec_shift);
-    uchar4 dodec_color = {125, 82, 2, 255};
-    // 1
-    trig_init(&trigs[8], dodec_V8, dodec_V4, dodec_V14, dodec_color);
-    trig_init(&trigs[9], dodec_V8, dodec_V14, dodec_V0, dodec_color);
-    trig_init(&trigs[10], dodec_V0, dodec_V14, dodec_V12, dodec_color);
-    // 2
-    trig_init(&trigs[11], dodec_V16, dodec_V0, dodec_V12, dodec_color);
-    trig_init(&trigs[12], dodec_V16, dodec_V12, dodec_V1, dodec_color);
-    trig_init(&trigs[13], dodec_V16, dodec_V1, dodec_V7, dodec_color);
-    // 3
-    trig_init(&trigs[14], dodec_V10, dodec_V8, dodec_V0, dodec_color);
-    trig_init(&trigs[15], dodec_V10, dodec_V0, dodec_V16, dodec_color);
-    trig_init(&trigs[16], dodec_V10, dodec_V16, dodec_V2, dodec_color);
-    // 4
-    trig_init(&trigs[17], dodec_V10, dodec_V6, dodec_V8, dodec_color);
-    trig_init(&trigs[18], dodec_V8, dodec_V6, dodec_V18, dodec_color);
-    trig_init(&trigs[19], dodec_V8, dodec_V18, dodec_V4, dodec_color);
-    // 5
-    trig_init(&trigs[21], dodec_V4, dodec_V18, dodec_V19, dodec_color);
-    trig_init(&trigs[22], dodec_V4, dodec_V19, dodec_V14, dodec_color);
-    trig_init(&trigs[23], dodec_V14, dodec_V19, dodec_V5, dodec_color);
-    // 6
-    trig_init(&trigs[24], dodec_V14, dodec_V5, dodec_V12, dodec_color);
-    trig_init(&trigs[25], dodec_V12, dodec_V5, dodec_V9, dodec_color);
-    trig_init(&trigs[26], dodec_V12, dodec_V9, dodec_V1, dodec_color);
-    // 7
-    trig_init(&trigs[27], dodec_V19, dodec_V7, dodec_V11, dodec_color);
-    trig_init(&trigs[28], dodec_V19, dodec_V11, dodec_V5, dodec_color);
-    trig_init(&trigs[29], dodec_V5, dodec_V11, dodec_V9, dodec_color);
-    // 8
-    trig_init(&trigs[30], dodec_V6, dodec_V15, dodec_V18, dodec_color);
-    trig_init(&trigs[31], dodec_V18, dodec_V15, dodec_V7, dodec_color);
-    trig_init(&trigs[32], dodec_V18, dodec_V7, dodec_V19, dodec_color);
-    // 9
-    trig_init(&trigs[33], dodec_V10, dodec_V2, dodec_V13, dodec_color);
-    trig_init(&trigs[34], dodec_V10, dodec_V13, dodec_V15, dodec_color);
-    trig_init(&trigs[36], dodec_V10, dodec_V15, dodec_V6, dodec_color);
-    // 10
-    trig_init(&trigs[37], dodec_V2, dodec_V16, dodec_V17, dodec_color);
-    trig_init(&trigs[38], dodec_V2, dodec_V17, dodec_V3, dodec_color);
-    trig_init(&trigs[39], dodec_V2, dodec_V3, dodec_V13, dodec_color);
-    // 11
-    trig_init(&trigs[40], dodec_V13, dodec_V3, dodec_V15, dodec_color);
-    trig_init(&trigs[41], dodec_V15, dodec_V13, dodec_V11, dodec_color);
-    trig_init(&trigs[42], dodec_V15, dodec_V1, dodec_V7, dodec_color);
-    // 12
-    trig_init(&trigs[43], dodec_V17, dodec_V1, dodec_V9, dodec_color);
-    trig_init(&trigs[44], dodec_V3, dodec_V17, dodec_V9, dodec_color);
-    trig_init(&trigs[45], dodec_V17, dodec_V11, dodec_V3, dodec_color);
+    uchar4 dodec_color = figure_data[1].color;
+    trig_init(&trigs[8], dodec_V8, dodec_V4, dodec_V14, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[9], dodec_V8, dodec_V14, dodec_V0, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[10], dodec_V0, dodec_V14, dodec_V12, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[11], dodec_V16, dodec_V0, dodec_V12, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[12], dodec_V16, dodec_V12, dodec_V1, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[13], dodec_V16, dodec_V1, dodec_V7, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[14], dodec_V10, dodec_V8, dodec_V0, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[15], dodec_V10, dodec_V0, dodec_V16, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[16], dodec_V10, dodec_V16, dodec_V2, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[17], dodec_V10, dodec_V6, dodec_V8, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[18], dodec_V8, dodec_V6, dodec_V18, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[19], dodec_V8, dodec_V18, dodec_V4, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[21], dodec_V4, dodec_V18, dodec_V19, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[22], dodec_V4, dodec_V19, dodec_V14, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[23], dodec_V14, dodec_V19, dodec_V5, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[24], dodec_V14, dodec_V5, dodec_V12, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[25], dodec_V12, dodec_V5, dodec_V9, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[26], dodec_V12, dodec_V9, dodec_V1, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[27], dodec_V19, dodec_V7, dodec_V11, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[28], dodec_V19, dodec_V11, dodec_V5, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[29], dodec_V5, dodec_V11, dodec_V9, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[30], dodec_V6, dodec_V15, dodec_V18, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[31], dodec_V18, dodec_V15, dodec_V7, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[32], dodec_V18, dodec_V7, dodec_V19, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[33], dodec_V10, dodec_V2, dodec_V13, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[34], dodec_V10, dodec_V13, dodec_V15, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[36], dodec_V10, dodec_V15, dodec_V6, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[37], dodec_V2, dodec_V16, dodec_V17, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[38], dodec_V2, dodec_V17, dodec_V3, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[39], dodec_V2, dodec_V3, dodec_V13, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[40], dodec_V13, dodec_V3, dodec_V15, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[41], dodec_V15, dodec_V13, dodec_V11, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[42], dodec_V15, dodec_V1, dodec_V7, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[43], dodec_V17, dodec_V1, dodec_V9, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[44], dodec_V3, dodec_V17, dodec_V9, dodec_color, figure_data[1].r, figure_data[1].tr);
+    trig_init(&trigs[45], dodec_V17, dodec_V11, dodec_V3, dodec_color, figure_data[1].r, figure_data[1].tr);
+
+    double ekos_radius = 2.118;
+    double ekos_scale = figure_data[2].radius / ekos_radius;
+    double3 ekos_shift = figure_data[2].center;
+    double3 ekos_v0 = {1.0, 1.61803, 0.0};
+    double3 ekos_v1 = {-1.0, 1.61803, 0.0};
+    double3 ekos_v2 = {1.0, -1.61803, 0.0};
+    double3 ekos_v3 = {-1.0, -1.61803, 0.0};
+    double3 ekos_v4 = {0.0, 1.0, 1.61803};
+    double3 ekos_v5 = {0.0, -1.0, 1.61803};
+    double3 ekos_v6 = {0.0, 1.0, -1.61803};
+    double3 ekos_v7 = {0.0, -1.0, -1.61803};
+    double3 ekos_v8 = {1.61803, 0.0, 1.0};
+    double3 ekos_v9 = {-1.61803, 0.0, 1.0};
+    double3 ekos_v10 = {1.61803, 0.0, -1.0};
+    double3 ekos_v11 = {-1.61803, 0.0, -1.0};
+    double3 ekos_V0 = transform_figure(ekos_v0, ekos_scale, ekos_shift);
+    double3 ekos_V1 = transform_figure(ekos_v1, ekos_scale, ekos_shift);
+    double3 ekos_V2 = transform_figure(ekos_v2, ekos_scale, ekos_shift);
+    double3 ekos_V3 = transform_figure(ekos_v3, ekos_scale, ekos_shift);
+    double3 ekos_V4 = transform_figure(ekos_v4, ekos_scale, ekos_shift);
+    double3 ekos_V5 = transform_figure(ekos_v5, ekos_scale, ekos_shift);
+    double3 ekos_V6 = transform_figure(ekos_v6, ekos_scale, ekos_shift);
+    double3 ekos_V7 = transform_figure(ekos_v7, ekos_scale, ekos_shift);
+    double3 ekos_V8 = transform_figure(ekos_v8, ekos_scale, ekos_shift);
+    double3 ekos_V9 = transform_figure(ekos_v9, ekos_scale, ekos_shift);
+    double3 ekos_V10 = transform_figure(ekos_v10, ekos_scale, ekos_shift);
+    double3 ekos_V11 = transform_figure(ekos_v11, ekos_scale, ekos_shift);
+    uchar4 ekos_color = figure_data[2].color;
+    trig_init(&trigs[46], ekos_V5, ekos_V4, ekos_V8, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[47], ekos_V4, ekos_V9, ekos_V1, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[48], ekos_V4, ekos_V5, ekos_V9, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[49], ekos_V5, ekos_V3, ekos_V9, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[50], ekos_V4, ekos_V1, ekos_V0, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[51], ekos_V8, ekos_V4, ekos_V0, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[52], ekos_V2, ekos_V5, ekos_V8, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[53], ekos_V8, ekos_V4, ekos_V1, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[54], ekos_V5, ekos_V2, ekos_V3, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[55], ekos_V10, ekos_V2, ekos_V8, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[56], ekos_V10, ekos_V8, ekos_V0, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[57], ekos_V7, ekos_V2, ekos_V10, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[58], ekos_V7, ekos_V10, ekos_V6, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[59], ekos_V0, ekos_V6, ekos_V10, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[60], ekos_V0, ekos_V1, ekos_V1, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[61], ekos_V1, ekos_V9, ekos_V11, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[62], ekos_V1, ekos_V11, ekos_V6, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[63], ekos_V11, ekos_V7, ekos_V6, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[64], ekos_V9, ekos_V3, ekos_V11, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[65], ekos_V3, ekos_V7, ekos_V11, ekos_color, figure_data[2].r, figure_data[2].tr);
+    trig_init(&trigs[66], ekos_V3, ekos_V2, ekos_V7, ekos_color, figure_data[2].r, figure_data[2].tr);
 }
 
-void init_lights(Light *lights) {
+struct LightDto {
+    double3 position;
+    double3 color;
+};
+
+void init_lights(Light *lights, LightDto *lights_data, int n_lights) {
     Light amb;
     amb.type = LightType::AMBIENT;
     amb.intensity = 0.5; 
     lights[0] = amb;
-    {
+    for (int i = 1; i < n_lights; i++) {
         Light pnt;
         pnt.type = LightType::POINT;
-        pnt.intensity = 0.2;
-        pnt.position  = {-4.0, 4.0, 3};
-        lights[1] = pnt;
+        pnt.intensity = 1.0;
+        pnt.position = lights_data[i - 1].position;
+        lights[i] = pnt;
     }
-    {
-        Light pnt;
-        pnt.type = LightType::POINT;
-        pnt.intensity = 0.5;
-        pnt.position  = {0., 0., 4.};
-        lights[2] = pnt;
-    }
-    // for (int i = 0; i < n_trig_center_points; i++) {
-    //     Light pnt;
-    //     pnt.type = LightType::POINT;
-    //     pnt.intensity = 0.8;
-    //     pnt.position = trig_center_points[i];
-    //     lights[i + 3] = pnt;
-    // }
 }
 
 __host__ __device__ double compute_shadow(Rect *rects, int n_rects, Trig *trigs, int n_trigs, double3 O, double3 D, double t_min, double t_max) {
@@ -709,28 +760,125 @@ void render(Rect *rects, int n_rects, Trig *trigs, int n_trigs, Light *lights, i
 int main(int argc, char const *argv[])
 {
     int cuda = 1;
+    if (argc == 2) {
+        if (strcmp(argv[1], "--cpu") == 0) {
+            cuda = 0;
+        } else if (strcmp(argv[1], "--default") == 0) {
+            printf("300\n");
+            printf("floor.data\n");
+            printf("frames/frame%s.out\n", "%d");
+            printf("640 480 120\n");
+            printf("6.0 5.0 0.0 2.0 1.0 0.05 0.1 0.05 0.0 0.0\n");
+            printf("3.0 0.0 3.1415926 1.5 0.5 0.03 0.07 0.02 0.0 0.0\n");
+            printf("-2.5 2.5 2 0.9843 0.4745 0.0156 2.25 0.1 0.6\n");
+            printf("2.5 2.5 2 0.49 0.3216 0.0078 1.732 0.1 0.6\n");
+            printf("2.5 -2.5 2 0.949 0.773 0.05 2.118 0.1 0.6\n");
+            printf("-5 -5 0\n");
+            printf("5 -5 0\n");
+            printf("5 5 0\n");
+            printf("-5 5 0\n");
+            printf("2\n");
+            printf("-4 4 3 1 1 1\n");
+            printf("5 0 4 1 1 1\n");
+            printf("4 3\n");
+            return 0;
+        }
+    }
 
-    int frame_cnt = atoi(argv[1]);
+    int frame_cnt = 126;
+    char floor_file_path[1024];
+    char frame_files_path[1024];
+    int w = 640, h = 480;
+    double angle = 120.0;
+
+    double r_c0 = 6.0, z_c0 = 5.0, phi_c0 = 0.0;
+    double A_c_r = 2.0, A_c_z = 1.0;
+    double omega_c_r = 0.05, omega_c_z = 0.1, omega_c_phi = 0.05;
+    double p_c_r = 0.0, p_c_z = 0.0;
+
+    double r_n0 = 3.0, z_n0 = 0.0, phi_n0 = M_PI;
+    double A_n_r = 1.5, A_n_z = 0.5;
+    double omega_n_r = 0.03, omega_n_z = 0.07, omega_n_phi = 0.02;
+    double p_n_r = 0.0, p_n_z = 0.0;
+
+    FigureDto *figures_data = (FigureDto *) malloc(sizeof(FigureDto) * 3);
+    FloorDto floor_data;
+    
+    int n_lights = 3;
+    LightDto *lights_data;
     int max_depth = 10;
+    int k = 3;
+
+    scanf("%d", &frame_cnt);
+    getchar();
+    scanf("%s", floor_file_path);
+    getchar();
+    scanf("%s", frame_files_path);
+    getchar();
+    scanf("%d %d %lf", &w, &h, &angle);
+    getchar();
+    scanf("%lf %lf %lf %lf %lf %lf %lf %lf %lf %lf", &r_c0, &z_c0, &phi_c0,
+          &A_c_r, &A_c_z, &omega_c_r, &omega_c_z, &omega_c_phi, &p_c_r, &p_c_z);
+    getchar();
+    scanf("%lf %lf %lf %lf %lf %lf %lf %lf %lf %lf", &r_n0, &z_n0, &phi_n0,
+          &A_n_r, &A_n_z, &omega_n_r, &omega_n_z, &omega_n_phi, &p_n_r, &p_n_z);
+    getchar();
+    for (int idx = 0; idx < 3; idx++) {
+        scanf("%lf %lf %lf", &figures_data[idx].center.x, &figures_data[idx].center.y, &figures_data[idx].center.z);
+        getchar();
+        scanf("%lf %lf %lf", &figures_data[idx].ncolor.x, &figures_data[idx].ncolor.y, &figures_data[idx].ncolor.z);
+        getchar();
+        figures_data[idx].color = {
+            (uchar)(figures_data[idx].ncolor.x * 255),
+            (uchar)(figures_data[idx].ncolor.y * 255),
+            (uchar)(figures_data[idx].ncolor.z * 255),
+            255,
+        };
+        scanf("%lf", &figures_data[idx].radius);
+        getchar();
+        scanf("%lf", &figures_data[idx].r);
+        getchar();
+        scanf("%lf", &figures_data[idx].tr);
+        getchar();
+        scanf("%d", &figures_data[idx].num_points);
+        getchar();
+    }
+    scanf("%lf %lf %lf", &floor_data.a.x, &floor_data.a.y, &floor_data.a.z);
+    getchar();
+    scanf("%lf %lf %lf", &floor_data.b.x, &floor_data.b.y, &floor_data.b.z);
+    getchar();
+    scanf("%lf %lf %lf", &floor_data.c.x, &floor_data.c.y, &floor_data.c.z);
+    getchar();
+    scanf("%lf %lf %lf", &floor_data.d.x, &floor_data.d.y, &floor_data.d.z);
+    getchar();
+    scanf("%lf %lf %lf", &floor_data.color.x, &floor_data.color.y, &floor_data.color.z);
+    getchar();
+    scanf("%d", &n_lights);
+    getchar();
+    n_lights += 1;
+    lights_data = (LightDto *) malloc(sizeof(LightDto) * n_lights);
+    for (int idx = 1; idx < n_lights; idx++) {
+        scanf("%lf %lf %lf", &lights_data[idx].position.x, &lights_data[idx].position.y, &lights_data[idx].position.z);
+        scanf("%lf %lf %lf", &lights_data[idx].color.x, &lights_data[idx].color.y, &lights_data[idx].color.z);
+    }
+    scanf("%d %d", &max_depth, &k);
+
     int n_rects = 1;
     Rect *rects = (Rect *) malloc(sizeof(Rect) * n_rects);
-    int n_trigs = 46;
+    int n_trigs = 67;
     Trig *trigs = (Trig *) malloc(sizeof(Trig) * n_trigs);
     int texW, texH;
-   	FILE *fp = fopen("floor.data", "rb");
+   	FILE *fp = fopen(floor_file_path, "rb");
     fread(&texW, sizeof(int), 1, fp);
 	fread(&texH, sizeof(int), 1, fp);
     uchar4 *floor_tex = (uchar4 *)malloc(sizeof(uchar4) * texW * texH);
     fread(floor_tex, sizeof(uchar4), texW * texH, fp);
     fclose(fp);
 
-    build_space(rects, trigs, floor_tex, texW, texH);
-    int n_lights = 3;
+    build_space(rects, trigs, floor_tex, texW, texH, figures_data, floor_data);
     Light *lights = (Light *) malloc(sizeof(Light) * n_lights);
-    init_lights(lights);
+    init_lights(lights, lights_data, n_lights);
     
-    int w = 640, h = 480;
-    int k = 1;
     int bigW = w * k;
     int bigH = h * k;
     uchar4 *data_big = (uchar4*)malloc(sizeof(uchar4) * bigW * bigH);
@@ -759,24 +907,46 @@ int main(int argc, char const *argv[])
         CSC(cudaMemcpy(floor_tex_dev, floor_tex, sizeof(uchar4) * texW * texH, cudaMemcpyHostToDevice));
     }
 
+    float start_cpu, end_cpu;
+    cudaEvent_t start, stop;
+    float gpu_time = 0.0;
+    if (cuda) {
+        CSC(cudaEventCreate(&start));
+        CSC(cudaEventCreate(&stop));
+    }
     for(int idx = 0; idx < frame_cnt; idx++) {
+        if (cuda) {
+            CSC(cudaEventRecord(start, 0));
+        } else {
+            start_cpu = clock();
+        }
+        double t = idx * 1.0;
+        double r_c = r_c0 + A_c_r * sin(omega_c_r * t + p_c_r);
+        double z_c = z_c0 + A_c_z * sin(omega_c_z * t + p_c_z);
+        double phi_c = phi_c0 + omega_c_phi * t;
+
         pc = {
-            6.0 * std::sin(0.05 * idx), 
-            6.0 * std::cos(0.05 * idx), 
-            5.0 + 2.0 * std::sin(0.1 * idx)
+            r_c * cos(phi_c),
+            r_c * sin(phi_c),
+            z_c
         };
+
+        double r_n = r_n0 + A_n_r * sin(omega_n_r * t + p_n_r);
+        double z_n = z_n0 + A_n_z * sin(omega_n_z * t + p_n_z);
+        double phi_n = phi_n0 + omega_n_phi * t;
+
         pv = {
-            3.0 * std::sin(0.05 * idx + M_PI), 
-            3.0 * std::cos(0.05 * idx + M_PI), 
-            0.0
+            r_n * cos(phi_n),
+            r_n * sin(phi_n),
+            z_n
         };
         
         if (cuda) {
             render_kernel<<<dim3(16, 16), dim3(16, 16)>>>(rects_dev, n_rects, trigs_dev, n_trigs,
-                lights_dev, n_lights, pc, pv, bigW, bigH, 120.0, data_big_dev, max_depth, floor_tex_dev);
+                lights_dev, n_lights, pc, pv, bigW, bigH, angle, data_big_dev, max_depth, floor_tex_dev);
         } else {
             render(rects, n_rects, trigs, n_trigs, lights, n_lights,
-                pc, pv, bigW, bigH, 120.0, data_big, max_depth, floor_tex);
+                pc, pv, bigW, bigH, angle, data_big, max_depth, floor_tex);
         }
         if (cuda) {
             ssaa_kernel<<<dim3(16, 16), dim3(16, 16)>>>(data_big_dev, data_small_dev,
@@ -792,14 +962,24 @@ int main(int argc, char const *argv[])
         if (cuda) {
             CSC(cudaMemcpy(data_small, data_small_dev, sizeof(uchar4) * w * h, cudaMemcpyDeviceToHost));
         }
-        sprintf(buff, "frames/frame%d.out", idx);
-        printf("Generating [%d/%d]: %s\n", idx+1, frame_cnt, buff);
+        sprintf(buff, frame_files_path, idx);
+        // printf("Generating [%d/%d]: %s\n", idx+1, frame_cnt, buff);
 
         FILE *out = fopen(buff, "wb");
         fwrite(&w, sizeof(int), 1, out);
         fwrite(&h, sizeof(int), 1, out);
         fwrite(data_small, sizeof(uchar4), w*h, out);
         fclose(out);
+
+        if (cuda) {
+            CSC(cudaEventRecord(stop, 0));
+            CSC(cudaEventSynchronize(stop));
+            CSC(cudaEventElapsedTime(&gpu_time, start, stop));
+            printf("%f %d\n", gpu_time, w * h);
+        } else {
+            end_cpu = clock();
+            printf("%f %d\n", (double)((end_cpu - start_cpu) / 1000), w * h);
+        }
     }
 
     if (cuda) {
@@ -814,6 +994,8 @@ int main(int argc, char const *argv[])
     free(lights);
     free(trigs);
     free(rects);
+    free(lights_data);
+    free(figures_data);
     free(floor_tex);
     return 0;
 }

@@ -1,6 +1,6 @@
 #! /bin/bash
 
-cnt=$1
+arg=$1
 make
-./kp $cnt
-python3 converter.py $cnt
+./kp $arg < t1.txt
+python3 converter.py 300
