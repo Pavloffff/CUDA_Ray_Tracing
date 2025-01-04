@@ -86,6 +86,12 @@ __host__ __device__ double3 mult(double3 a, double3 b, double3 c, double3 v) {
     };
 }
 
+__host__ __device__ double3 reflect(double3 R, double3 N) {
+    double dotNR = dot(N, R);
+    double3 tmp = prod_num(N, 2.0*dotNR);
+    return diff(tmp, R);
+}
+
 __host__ __device__ enum class LightType {
     AMBIENT,
     POINT
@@ -103,47 +109,6 @@ __host__ __device__ struct IntersectDto {
     double tOut = 0.0;
 };
 
-__host__ __device__ struct Point {
-    double3 a;
-    double radius = 0.05;
-};
-
-__host__ __device__ void point_init(Point *point, double3 A) {
-    point->a = A;
-}
-
-__host__ __device__ uchar4 point_at(Point point, double3 P = {0, 0, 0}) {
-    return {255, 255, 255, 255};
-}
-
-__host__ __device__ IntersectDto point_intersect(Point point, double3 pos, double3 dir) {
-    IntersectDto ans;
-
-    double3 L = diff(point.a, pos);
-    double t = dot(L, dir) / dot(dir, dir);
-
-    if (t < 0.0) {
-        ans.res = false;
-        return ans;
-    }
-
-    double3 closest_point = add(pos, prod_num(dir, t));
-    double distance_squared = dot(diff(point.a, closest_point), diff(point.a, closest_point));
-
-    if (distance_squared <= point.radius * point.radius) {
-        ans.res = true;
-        ans.tOut = t;
-        return ans;
-    }
-
-    ans.res = false;
-    return ans;
-}
-
-__host__ __device__ double3 point_normal() {       
-    return {0.0, 0.0, 0.0};
-}
-
 __host__ __device__ struct Trig {
     double3 a, b, c;
     uchar4 color;
@@ -154,8 +119,8 @@ __host__ __device__ struct Trig {
 __host__ __device__ void trig_init(Trig *trig, double3 A, double3 B, double3 C, uchar4 col) {
     trig->a = A; trig->b = B; trig->c = C;
     trig->color = col;
-    trig->r = 0.4;
-    trig->tr = 0.6;
+    trig->r = 0.1;
+    trig->tr = 0.1;
     // r = 0.2;
     // tr = 0.1;
 }
@@ -314,17 +279,7 @@ __host__ __device__ double3 transform_figure(double3 v, double scale, double3 sh
     };
 };
 
-double3 *build_space(Rect *rects, uchar4 *floor_tex, int w, int h, int cnt_lights_on_edge) {
-    // rects[0] = Rect(
-    //     double3{-5, -5, 0}, 
-    //     double3{ 5, -5, 0},
-    //     double3{ 5,  5, 0},
-    //     double3{-5,  5, 0},
-    //     uchar4{0, 0, 255, 255},
-    //     floor_tex,
-    //     w,
-    //     h
-    // );
+void build_space(Rect *rects, Trig *trigs, uchar4 *floor_tex, int w, int h, int cnt_lights_on_edge) {
     rect_init(
         &rects[0],
         double3{-5, -5, 0}, 
@@ -336,109 +291,60 @@ double3 *build_space(Rect *rects, uchar4 *floor_tex, int w, int h, int cnt_light
         h
     );
 
-    // double oct_scale = 1.5;
-    // double3 oct_shift = {-2.5, 2.5, 0};
-    // double3 oct_v0 = {0, 0, 3};  // top
-    // double3 oct_v1 = {0, 0, 1};  // bottom
-    // double3 oct_v2 = {0, 1, 2};  // front
-    // double3 oct_v3 = {0,-1, 2};  // back
-    // double3 oct_v4 = {1, 0, 2};  // right
-    // double3 oct_v5 = {-1,0, 2};  // left
-    // double3 oct_V0 = transform_figure(oct_v0, oct_scale, oct_shift);
-    // double3 oct_V1 = transform_figure(oct_v1, oct_scale, oct_shift);
-    // double3 oct_V2 = transform_figure(oct_v2, oct_scale, oct_shift);
-    // double3 oct_V3 = transform_figure(oct_v3, oct_scale, oct_shift);
-    // double3 oct_V4 = transform_figure(oct_v4, oct_scale, oct_shift);
-    // double3 oct_V5 = transform_figure(oct_v5, oct_scale, oct_shift);
-    // uchar4 oct_color = {100, 100, 100, 255};
-    // polygons[1] = new Trig(oct_V0, oct_V2, oct_V4, oct_color);
-    // polygons[2] = new Trig(oct_V0, oct_V4, oct_V3, oct_color);
-    // polygons[3] = new Trig(oct_V0, oct_V3, oct_V5, oct_color);
-    // polygons[4] = new Trig(oct_V0, oct_V5, oct_V2, oct_color);
-    // polygons[5] = new Trig(oct_V1, oct_V4, oct_V2, oct_color);
-    // polygons[6] = new Trig(oct_V1, oct_V3, oct_V4, oct_color);
-    // polygons[7] = new Trig(oct_V1, oct_V5, oct_V3, oct_color);
-    // polygons[8] = new Trig(oct_V1, oct_V2, oct_V5, oct_color);
-    // int total_points = 1;
-    // double3 *center_points = new double3[total_points];
-    // double3 oct_point = oct_V0;
-    // oct_point = add(oct_point, oct_V1);
-    // oct_point = add(oct_point, oct_V2);
-    // oct_point = add(oct_point, oct_V3);
-    // oct_point = add(oct_point, oct_V4);
-    // oct_point = add(oct_point, oct_V5);
-    // oct_point = prod_num(oct_point, 1.0/6);
-    // center_points[0] = oct_point;
-
-    // int num_triangles = 8;              // Количество треугольников
-    // int num_edges_per_triangle = 3;     // Количество рёбер на треугольник
-    // int points_per_edge = 2; // Точек на каждом ребре
-
-    // int point_index = 9; // Начинаем добавлять точки после треугольников
-
-    // // Цикл по треугольникам
-    // for (int i = 1; i <= num_triangles; i++) {
-    //     Trig *triangle = static_cast<Trig*>(polygons[i]);
-
-    //     double3 vA = triangle->a;
-    //     double3 vB = triangle->b;
-    //     double3 vC = triangle->c;
-
-    //     // Три ребра: (A->B), (B->C), (C->A)
-    //     double3 edges[3][2] = {
-    //         {vA, vB},
-    //         {vB, vC},
-    //         {vC, vA}
-    //     };
-
-    //     for (int e = 0; e < num_edges_per_triangle; e++) {
-    //         double3 p1 = edges[e][0];
-    //         double3 p2 = edges[e][1];
-
-    //         // Создаём точки на каждом ребре
-    //         double step = 1.0 / (points_per_edge + 1);
-
-    //         for (int j = 1; j <= points_per_edge; j++) {
-    //             double t = j * step;
-    //             double3 point_position = lerp(p1, p2, t);
-    //             polygons[point_index++] = new Point(point_position);
-    //         }
-    //     }
-    // }
-
-    // return center_points;
-    return nullptr;
+    double oct_scale = 1.5;
+    double3 oct_shift = {-2.5, 2.5, 0};
+    double3 oct_v0 = {0, 0, 3};  // top
+    double3 oct_v1 = {0, 0, 1};  // bottom
+    double3 oct_v2 = {0, 1, 2};  // front
+    double3 oct_v3 = {0,-1, 2};  // back
+    double3 oct_v4 = {1, 0, 2};  // right
+    double3 oct_v5 = {-1,0, 2};  // left
+    double3 oct_V0 = transform_figure(oct_v0, oct_scale, oct_shift);
+    double3 oct_V1 = transform_figure(oct_v1, oct_scale, oct_shift);
+    double3 oct_V2 = transform_figure(oct_v2, oct_scale, oct_shift);
+    double3 oct_V3 = transform_figure(oct_v3, oct_scale, oct_shift);
+    double3 oct_V4 = transform_figure(oct_v4, oct_scale, oct_shift);
+    double3 oct_V5 = transform_figure(oct_v5, oct_scale, oct_shift);
+    uchar4 oct_color = {251, 121, 4, 255};
+    trig_init(&trigs[0], oct_V0, oct_V2, oct_V4, oct_color);
+    trig_init(&trigs[1], oct_V0, oct_V4, oct_V3, oct_color);
+    trig_init(&trigs[2], oct_V0, oct_V3, oct_V5, oct_color);
+    trig_init(&trigs[3], oct_V0, oct_V5, oct_V2, oct_color);
+    trig_init(&trigs[4], oct_V1, oct_V4, oct_V2, oct_color);
+    trig_init(&trigs[5], oct_V1, oct_V3, oct_V4, oct_color);
+    trig_init(&trigs[6], oct_V1, oct_V5, oct_V3, oct_color);
+    trig_init(&trigs[7], oct_V1, oct_V2, oct_V5, oct_color);
 }
 
-void init_lights(Light *lights, double3 *trig_center_points, int n_trig_center_points) {
+void init_lights(Light *lights) {
     Light amb;
     amb.type = LightType::AMBIENT;
     amb.intensity = 0.5; 
     lights[0] = amb;
+    {
+        Light pnt;
+        pnt.type = LightType::POINT;
+        pnt.intensity = 0.8;
+        pnt.position  = {-4.0, 4.0, 3};
+        lights[1] = pnt;
+    }
+    {
+        Light pnt;
+        pnt.type = LightType::POINT;
+        pnt.intensity = 0.5;
+        pnt.position  = {0., 0., 4.};
+        lights[2] = pnt;
+    }
     // for (int i = 0; i < n_trig_center_points; i++) {
     //     Light pnt;
     //     pnt.type = LightType::POINT;
     //     pnt.intensity = 0.8;
     //     pnt.position = trig_center_points[i];
-    //     lights[i + 1] = pnt;
-    // }
-    // {
-    //     Light pnt;
-    //     pnt.type = LightType::POINT;
-    //     pnt.intensity = 10.8;
-    //     pnt.position  = {-4.0, 4.0, 3};
-    //     lights[1] = pnt;
-    // }
-    // {
-    //     Light pnt;
-    //     pnt.type = LightType::POINT;
-    //     pnt.intensity = 10.0;
-    //     pnt.position  = {-1., -1., 1.};
-    //     lights[1] = pnt;
+    //     lights[i + 3] = pnt;
     // }
 }
 
-__host__ __device__ double compute_shadow(Rect *rects, int n_rects, double3 O, double3 D, double t_min, double t_max) {
+__host__ __device__ double compute_shadow(Rect *rects, int n_rects, Trig *trigs, int n_trigs, double3 O, double3 D, double t_min, double t_max) {
     double shadow_index = 1.0;
     for (int k = 0; k < n_rects; k++) {
         IntersectDto t = rect_intersect(rects[k], O, D);
@@ -448,16 +354,18 @@ __host__ __device__ double compute_shadow(Rect *rects, int n_rects, double3 O, d
             }
         }
     }
+    for (int k = 0; k < n_trigs; k++) {
+        IntersectDto t = trig_intersect(trigs[k], O, D);
+        if (t.res) {
+            if (t.tOut >= t_min && t.tOut <= t_max) {
+                shadow_index *= trigs[k].tr;
+            }
+        }
+    }
     return shadow_index;
 }
 
-__host__ __device__ double3 reflect(double3 R, double3 N) {
-    double dotNR = dot(N, R);
-    double3 tmp = prod_num(N, 2.0*dotNR);
-    return diff(tmp, R);
-}
-
-__host__ __device__ double compute_lighting(Rect *rects, int n_rects, Light *lights, int n_lights, double3 P, double3 N, double3 V, int specular) {
+__host__ __device__ double compute_lighting(Rect *rects, int n_rects, Trig *trigs, int n_trigs, Light *lights, int n_lights, double3 P, double3 N, double3 V, int specular) {
     double i = 0.0;
     for (int j = 0; j < n_lights; j++) {
         Light light = lights[j];
@@ -476,12 +384,7 @@ __host__ __device__ double compute_lighting(Rect *rects, int n_rects, Light *lig
                 t_max = 1e17;
             }
 
-            // int shadowIndex;
-            double shadowT = compute_shadow(rects, n_rects, P, L, 0.001, t_max);
-            // double shadowT = 1.0;
-            // if (closest_intersection(polygons, n_polygons, P, L, 0.001, t_max, shadowIndex, shadowT)) {
-            //     continue;
-            // }
+            double shadowT = compute_shadow(rects, n_rects, trigs, n_trigs, P, L, 0.001, t_max);
 
             double n_dot_l = dot(N, L);
             if (n_dot_l > 0.0) {
@@ -526,7 +429,7 @@ __host__ __device__ double3 refract(const double3& ray_dir, double3& a_normal)
 }
 
 template<int depth>
-__host__ __device__ uchar4 ray(Rect *rects, int n_rects, Light *lights, int n_lights, double3 pos, double3 dir, int max_depth, uchar4 *floor_tex) {
+__host__ __device__ uchar4 ray(Rect *rects, int n_rects, Trig *trigs, int n_trigs, Light *lights, int n_lights, double3 pos, double3 dir, int max_depth, uchar4 *floor_tex) {
     const double light_reps = 0.125;
     for (int k = 0; k < n_lights; k++) {
         if (lights[k].type == LightType::POINT) {
@@ -538,7 +441,7 @@ __host__ __device__ uchar4 ray(Rect *rects, int n_rects, Light *lights, int n_li
             }
         }
     }
-    int k_min = -1;
+    int k_min = -1, k_type = -1;
     double ts_min = DBL_MAX;
     for (int k = 0; k < n_rects; k++) {
         IntersectDto t = rect_intersect(rects[k], pos, dir);
@@ -546,48 +449,78 @@ __host__ __device__ uchar4 ray(Rect *rects, int n_rects, Light *lights, int n_li
             if (t.tOut < ts_min && t.tOut > 1e-6) {
                 ts_min = t.tOut;
                 k_min = k;
+                k_type = 0;
             }
         }
     }
+    for (int k = 0; k < n_trigs; k++) {
+        IntersectDto t = trig_intersect(trigs[k], pos, dir);
+        if (t.res) {
+            if (t.tOut < ts_min && t.tOut > 1e-6) {
+                ts_min = t.tOut;
+                k_min = k;
+                k_type = 1;
+            }
+        }
+    }
+
     if (k_min == -1) {
         return {0, 0, 0, 255};
     }
 
     double t = ts_min;
     double3 P = add(pos, prod_num(dir, t));
-    uchar4 base_color = rect_at(rects[k_min], floor_tex, P);
-    double3 N = rect_normal(rects[k_min]);
-    double3 V = {-dir.x, -dir.y, -dir.z};
-    double intensity = compute_lighting(rects, n_rects, lights, n_lights, P, N, V, 110);
-    uchar4 local_color = intensity * base_color;
-
-        // bool a = rects[k_min].r;
-
-    if (rects[k_min].r <= 0.0) {
-        return local_color;
+    uchar4 base_color = {255, 255, 255, 255};
+    double3 N = {0.0, 0.0, 0.0};
+    if (k_type == 0) {
+        base_color = rect_at(rects[k_min], floor_tex, P);
+        N = rect_normal(rects[k_min]);
+    } else if (k_type == 1) {
+        base_color = trig_at(trigs[k_min], P);
+        N = trig_normal(trigs[k_min]);
     }
-        // return {a, 0, 0, 255};
+    
+    double3 V = {-dir.x, -dir.y, -dir.z};
+    double intensity = compute_lighting(rects, n_rects, trigs, n_trigs, lights, n_lights, P, N, V, 110);
+    uchar4 local_color = intensity * base_color;
+    
+    if (k_type == 0) {
+        if (rects[k_min].r <= 0.0) {
+            return local_color;
+        }
+    } else if (k_type == 1) {
+        if (trigs[k_min].r <= 0.0) {
+            return local_color;
+        }
+    }
 
     double3 reflected_dir = reflect(prod_num(dir, -1.0), N);
     reflected_dir = norm(reflected_dir);
-    uchar4 reflected_color = ray<depth + 1>(rects, n_rects, lights, 
+    uchar4 reflected_color = ray<depth + 1>(rects, n_rects, trigs, n_trigs, lights, 
                                             n_lights, P, reflected_dir, max_depth, floor_tex);
 
     uchar4 refracted_color = reflected_color;
     double3 refracted_dir = refract(dir, N);
     if (std::sqrt(dot(refracted_dir, refracted_dir)) > 1e-6) {
-        refracted_color = ray<depth + 1>(rects, n_rects, lights, 
+        refracted_color = ray<depth + 1>(rects, n_rects, trigs, n_trigs, lights,
                                          n_lights, P, refracted_dir, max_depth, floor_tex);
     }
 
-    uchar4 out_color = rects[k_min].r * reflected_color + 
-        (1 - rects[k_min].r - rects[k_min].tr) * local_color + 
-        rects[k_min].tr * refracted_color;
+    uchar4 out_color = local_color;
+    if (k_type == 0) {
+        out_color = rects[k_min].r * reflected_color + 
+            (1 - rects[k_min].r - rects[k_min].tr) * local_color + 
+            rects[k_min].tr * refracted_color;
+    } else if (k_type == 1) {
+        out_color = trigs[k_min].r * reflected_color + 
+            (1 - trigs[k_min].r - trigs[k_min].tr) * local_color + 
+            trigs[k_min].tr * refracted_color;
+    }
     return out_color;
 }
 
 template<>
-__host__ __device__ uchar4 ray<4>(Rect *rects, int n_rects, Light *lights, int n_lights, double3 pos, double3 dir, int max_depth, uchar4 *floor_tex) {
+__host__ __device__ uchar4 ray<2>(Rect *rects, int n_rects, Trig *trigs, int n_trigs, Light *lights, int n_lights, double3 pos, double3 dir, int max_depth, uchar4 *floor_tex) {
     return {0, 0, 0, 255};
 }
 
@@ -621,14 +554,14 @@ __global__ void ssaa_kernel(uchar4 *big_data, uchar4 *small_data, int bigW, int 
 	int offsety = blockDim.y * gridDim.y;
     int i, j;
 
-    for (i = idy; i < w; i += offsety) {
-        for (j = idx; j < h; j += offsetx) {
+    for (i = idy; i < h; i += offsety) {
+        for (j = idx; j < w; j += offsetx) {
             small_data[i * w + j] = ssaa_pixel(big_data, bigW, bigH, j, i, k);
         }
     }
 }
 
-__global__ void render_kernel(Rect *rects, int n_rects, Light *lights, int n_lights, double3 pc, double3 pv, int w, int h, double angle, uchar4 *data, int max_depth, uchar4 *floor_tex) {
+__global__ void render_kernel(Rect *rects, int n_rects, Trig *trigs, int n_trigs, Light *lights, int n_lights, double3 pc, double3 pv, int w, int h, double angle, uchar4 *data, int max_depth, uchar4 *floor_tex) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
 	int idy = blockDim.y * blockIdx.y + threadIdx.y;
    	int offsetx = blockDim.x * gridDim.x;
@@ -652,13 +585,13 @@ __global__ void render_kernel(Rect *rects, int n_rects, Light *lights, int n_lig
             double3 dir = mult(bx, by, bz, v);
             dir = norm(dir);
             data[(h - 1 - j)*w + i] = ray<0>(
-                rects, n_rects, lights, n_lights, pc, dir, max_depth, floor_tex
+                rects, n_rects, trigs, n_trigs, lights, n_lights, pc, dir, max_depth, floor_tex
             );
         }
     }
 }
 
-__host__ __device__ void render(Rect *rects, int n_rects, Light *lights, int n_lights, double3 pc, double3 pv, int w, int h, double angle, uchar4 *data, int max_depth, uchar4 *floor_tex) {
+void render(Rect *rects, int n_rects, Trig *trigs, int n_trigs, Light *lights, int n_lights, double3 pc, double3 pv, int w, int h, double angle, uchar4 *data, int max_depth, uchar4 *floor_tex) {
     double dw = 2.0 / (w - 1.0);
     double dh = 2.0 / (h - 1.0);
     double z  = 1.0 / std::tan(angle * M_PI / 360.0);
@@ -677,7 +610,7 @@ __host__ __device__ void render(Rect *rects, int n_rects, Light *lights, int n_l
             double3 dir = mult(bx, by, bz, v);
             dir = norm(dir);
             data[(h - 1 - j)*w + i] = ray<0>(
-                rects, n_rects, lights, n_lights, pc, dir, max_depth, floor_tex
+                rects, n_rects, trigs, n_trigs, lights, n_lights, pc, dir, max_depth, floor_tex
             );
         }
     }
@@ -691,6 +624,8 @@ int main(int argc, char const *argv[])
     int max_depth = 10;
     int n_rects = 1;
     Rect *rects = (Rect *) malloc(sizeof(Rect) * n_rects);
+    int n_trigs = 8;
+    Trig *trigs = (Trig *) malloc(sizeof(Trig) * n_trigs);
     int texW, texH;
    	FILE *fp = fopen("floor.data", "rb");
     fread(&texW, sizeof(int), 1, fp);
@@ -700,13 +635,12 @@ int main(int argc, char const *argv[])
     fclose(fp);
 
     int cnt_lights_on_center = 1;
-    double3 *trig_center_points = build_space(rects, floor_tex, texW, texH, cnt_lights_on_center);
-    // int n_lights = 3 * cnt_lights_on_edge * (n_rects - 1) + 1;
-    int n_lights = 1;
-    Light *lights = (Light *) malloc(sizeof(Light) *n_lights);
-    init_lights(lights, trig_center_points, n_lights - 1);
-    // printf("%lf %lf %lf\n", trig_center_points[0].x, trig_center_points[0].y, trig_center_points[0].z);
-    int w = 500, h = 500;
+    build_space(rects, trigs, floor_tex, texW, texH, cnt_lights_on_center);
+    int n_lights = 3;
+    Light *lights = (Light *) malloc(sizeof(Light) * n_lights);
+    init_lights(lights);
+    
+    int w = 640, h = 480;
     int k = 1;
     int bigW = w * k;
     int bigH = h * k;
@@ -718,6 +652,7 @@ int main(int argc, char const *argv[])
     uchar4 *data_big_dev;
     uchar4 *data_small_dev;
     Rect *rects_dev;
+    Trig *trigs_dev;
     uchar4 *floor_tex_dev;
     Light *lights_dev;
     if (cuda) {
@@ -727,6 +662,8 @@ int main(int argc, char const *argv[])
         CSC(cudaMemcpy(data_small_dev, data_small, sizeof(uchar4) * w * h, cudaMemcpyHostToDevice));
         CSC(cudaMalloc(&rects_dev, sizeof(Rect) * n_rects));
         CSC(cudaMemcpy(rects_dev, rects, sizeof(Rect) * n_rects, cudaMemcpyHostToDevice));
+        CSC(cudaMalloc(&trigs_dev, sizeof(Trig) * n_trigs));
+        CSC(cudaMemcpy(trigs_dev, trigs, sizeof(Trig) * n_trigs, cudaMemcpyHostToDevice));
         CSC(cudaMalloc(&lights_dev, sizeof(Light) * n_lights));
         CSC(cudaMemcpy(lights_dev, lights, sizeof(Light) * n_lights, cudaMemcpyHostToDevice));
         CSC(cudaMalloc(&floor_tex_dev, sizeof(uchar4) * texW * texH));
@@ -746,16 +683,14 @@ int main(int argc, char const *argv[])
         };
         
         if (cuda) {
-            render_kernel<<<dim3(2, 2), dim3(2, 2)>>>(rects_dev, n_rects,
+            render_kernel<<<dim3(16, 16), dim3(16, 16)>>>(rects_dev, n_rects, trigs_dev, n_trigs,
                 lights_dev, n_lights, pc, pv, bigW, bigH, 120.0, data_big_dev, max_depth, floor_tex_dev);
-            // printf("%d\n", cudaGetLastError());
         } else {
-            render(rects, n_rects, lights, n_lights,
+            render(rects, n_rects, trigs, n_trigs, lights, n_lights,
                 pc, pv, bigW, bigH, 120.0, data_big, max_depth, floor_tex);
         }
-        // CSC(cudaMemcpy(data_big_dev, data_big, sizeof(uchar4) * bigW * bigH, cudaMemcpyHostToDevice));
         if (cuda) {
-            ssaa_kernel<<<dim3(2, 2), dim3(2, 2)>>>(data_big_dev, data_small_dev,
+            ssaa_kernel<<<dim3(16, 16), dim3(16, 16)>>>(data_big_dev, data_small_dev,
                 bigW, bigH, w, h, k);
         } else {
             for (int y = 0; y < h; y++) {
@@ -776,20 +711,20 @@ int main(int argc, char const *argv[])
         fwrite(&h, sizeof(int), 1, out);
         fwrite(data_small, sizeof(uchar4), w*h, out);
         fclose(out);
-        // printf("%d\n", cudaGetLastError());
     }
 
     if (cuda) {
         CSC(cudaFree(lights_dev));
         CSC(cudaFree(rects_dev));
+        CSC(cudaFree(trigs_dev));
         CSC(cudaFree(data_small_dev));
         CSC(cudaFree(data_big_dev));
     }
-    free(trig_center_points);
     free(data_big);
     free(data_small);
-    free(floor_tex);
-    free(rects);
     free(lights);
+    free(trigs);
+    free(rects);
+    free(floor_tex);
     return 0;
 }
