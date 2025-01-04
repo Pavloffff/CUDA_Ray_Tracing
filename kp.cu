@@ -120,9 +120,7 @@ __host__ __device__ void trig_init(Trig *trig, double3 A, double3 B, double3 C, 
     trig->a = A; trig->b = B; trig->c = C;
     trig->color = col;
     trig->r = 0.1;
-    trig->tr = 0.1;
-    // r = 0.2;
-    // tr = 0.1;
+    trig->tr = 0.6;
 }
 
 __host__ __device__ uchar4 trig_at(Trig trig, double3 P = {0, 0, 0}) {
@@ -279,7 +277,7 @@ __host__ __device__ double3 transform_figure(double3 v, double scale, double3 sh
     };
 };
 
-void build_space(Rect *rects, Trig *trigs, uchar4 *floor_tex, int w, int h, int cnt_lights_on_edge) {
+void build_space(Rect *rects, Trig *trigs, uchar4 *floor_tex, int w, int h) {
     rect_init(
         &rects[0],
         double3{-5, -5, 0}, 
@@ -292,13 +290,13 @@ void build_space(Rect *rects, Trig *trigs, uchar4 *floor_tex, int w, int h, int 
     );
 
     double oct_scale = 1.5;
-    double3 oct_shift = {-2.5, 2.5, 0};
-    double3 oct_v0 = {0, 0, 3};  // top
-    double3 oct_v1 = {0, 0, 1};  // bottom
-    double3 oct_v2 = {0, 1, 2};  // front
-    double3 oct_v3 = {0,-1, 2};  // back
-    double3 oct_v4 = {1, 0, 2};  // right
-    double3 oct_v5 = {-1,0, 2};  // left
+    double3 oct_shift = {-2.5, 2.5, 2};
+    double3 oct_v0 = {0, 0, 1};
+    double3 oct_v1 = {0, 0,-1};
+    double3 oct_v2 = {0, 1, 0};
+    double3 oct_v3 = {0,-1, 0};
+    double3 oct_v4 = {1, 0, 0};
+    double3 oct_v5 = {-1,0, 0};
     double3 oct_V0 = transform_figure(oct_v0, oct_scale, oct_shift);
     double3 oct_V1 = transform_figure(oct_v1, oct_scale, oct_shift);
     double3 oct_V2 = transform_figure(oct_v2, oct_scale, oct_shift);
@@ -314,6 +312,98 @@ void build_space(Rect *rects, Trig *trigs, uchar4 *floor_tex, int w, int h, int 
     trig_init(&trigs[5], oct_V1, oct_V3, oct_V4, oct_color);
     trig_init(&trigs[6], oct_V1, oct_V5, oct_V3, oct_color);
     trig_init(&trigs[7], oct_V1, oct_V2, oct_V5, oct_color);
+
+    double dodec_scale = 0.7;
+    double3 dodec_shift = {2.5, 2.5, 2};
+    double3 dodec_v0 = {1.0, 1.0, 1.0};
+    double3 dodec_v1 = {1.0, 1.0, -1.0};
+    double3 dodec_v2 = {1.0, -1.0, 1.0};
+    double3 dodec_v3 = {1.0, -1.0, -1.0};
+    double3 dodec_v4 = {-1.0, 1.0, 1.0};
+    double3 dodec_v5 = {-1.0, 1.0, -1.0};
+    double3 dodec_v6 = {-1.0, -1.0, 1.0};
+    double3 dodec_v7 = {-1.0, -1.0, -1.0};
+    double3 dodec_v8 = {0.0, 0.618034, 1.61803};
+    double3 dodec_v9 = {0.0, 0.618034, -1.61803};
+    double3 dodec_v10 = {0.0, -0.618034, 1.61803};
+    double3 dodec_v11 = {0.0, -0.618034, -1.61803};
+    double3 dodec_v12 = {0.618034, 1.61803, 0.0};
+    double3 dodec_v13 = {0.618034, -1.61803, 0.0};
+    double3 dodec_v14 = {-0.618034, 1.61803, 0.0};
+    double3 dodec_v15 = {-0.618034, -1.61803, 0.0};
+    double3 dodec_v16 = {1.61803, 0.0, 0.618034};
+    double3 dodec_v17 = {1.61803, 0.0, -0.618034};
+    double3 dodec_v18 = {-1.61803, 0.0, 0.618034};
+    double3 dodec_v19 = {-1.61803, 0.0, -0.618034};
+    double3 dodec_V0 = transform_figure(dodec_v0, dodec_scale, dodec_shift);
+    double3 dodec_V1 = transform_figure(dodec_v1, dodec_scale, dodec_shift);
+    double3 dodec_V2 = transform_figure(dodec_v2, dodec_scale, dodec_shift);
+    double3 dodec_V3 = transform_figure(dodec_v3, dodec_scale, dodec_shift);
+    double3 dodec_V4 = transform_figure(dodec_v4, dodec_scale, dodec_shift);
+    double3 dodec_V5 = transform_figure(dodec_v5, dodec_scale, dodec_shift);
+    double3 dodec_V6 = transform_figure(dodec_v6, dodec_scale, dodec_shift);
+    double3 dodec_V7 = transform_figure(dodec_v7, dodec_scale, dodec_shift);
+    double3 dodec_V8 = transform_figure(dodec_v8, dodec_scale, dodec_shift);
+    double3 dodec_V9 = transform_figure(dodec_v9, dodec_scale, dodec_shift);
+    double3 dodec_V10 = transform_figure(dodec_v10, dodec_scale, dodec_shift);
+    double3 dodec_V11 = transform_figure(dodec_v11, dodec_scale, dodec_shift);
+    double3 dodec_V12 = transform_figure(dodec_v12, dodec_scale, dodec_shift);
+    double3 dodec_V13 = transform_figure(dodec_v13, dodec_scale, dodec_shift);
+    double3 dodec_V14 = transform_figure(dodec_v14, dodec_scale, dodec_shift);
+    double3 dodec_V15 = transform_figure(dodec_v15, dodec_scale, dodec_shift);
+    double3 dodec_V16 = transform_figure(dodec_v16, dodec_scale, dodec_shift);
+    double3 dodec_V17 = transform_figure(dodec_v17, dodec_scale, dodec_shift);
+    double3 dodec_V18 = transform_figure(dodec_v18, dodec_scale, dodec_shift);
+    double3 dodec_V19 = transform_figure(dodec_v19, dodec_scale, dodec_shift);
+    uchar4 dodec_color = {125, 82, 2, 255};
+    // 1
+    trig_init(&trigs[8], dodec_V8, dodec_V4, dodec_V14, dodec_color);
+    trig_init(&trigs[9], dodec_V8, dodec_V14, dodec_V0, dodec_color);
+    trig_init(&trigs[10], dodec_V0, dodec_V14, dodec_V12, dodec_color);
+    // 2
+    trig_init(&trigs[11], dodec_V16, dodec_V0, dodec_V12, dodec_color);
+    trig_init(&trigs[12], dodec_V16, dodec_V12, dodec_V1, dodec_color);
+    trig_init(&trigs[13], dodec_V16, dodec_V1, dodec_V7, dodec_color);
+    // 3
+    trig_init(&trigs[14], dodec_V10, dodec_V8, dodec_V0, dodec_color);
+    trig_init(&trigs[15], dodec_V10, dodec_V0, dodec_V16, dodec_color);
+    trig_init(&trigs[16], dodec_V10, dodec_V16, dodec_V2, dodec_color);
+    // 4
+    trig_init(&trigs[17], dodec_V10, dodec_V6, dodec_V8, dodec_color);
+    trig_init(&trigs[18], dodec_V8, dodec_V6, dodec_V18, dodec_color);
+    trig_init(&trigs[19], dodec_V8, dodec_V18, dodec_V4, dodec_color);
+    // 5
+    trig_init(&trigs[21], dodec_V4, dodec_V18, dodec_V19, dodec_color);
+    trig_init(&trigs[22], dodec_V4, dodec_V19, dodec_V14, dodec_color);
+    trig_init(&trigs[23], dodec_V14, dodec_V19, dodec_V5, dodec_color);
+    // 6
+    trig_init(&trigs[24], dodec_V14, dodec_V5, dodec_V12, dodec_color);
+    trig_init(&trigs[25], dodec_V12, dodec_V5, dodec_V9, dodec_color);
+    trig_init(&trigs[26], dodec_V12, dodec_V9, dodec_V1, dodec_color);
+    // 7
+    trig_init(&trigs[27], dodec_V19, dodec_V7, dodec_V11, dodec_color);
+    trig_init(&trigs[28], dodec_V19, dodec_V11, dodec_V5, dodec_color);
+    trig_init(&trigs[29], dodec_V5, dodec_V11, dodec_V9, dodec_color);
+    // 8
+    trig_init(&trigs[30], dodec_V6, dodec_V15, dodec_V18, dodec_color);
+    trig_init(&trigs[31], dodec_V18, dodec_V15, dodec_V7, dodec_color);
+    trig_init(&trigs[32], dodec_V18, dodec_V7, dodec_V19, dodec_color);
+    // 9
+    trig_init(&trigs[33], dodec_V10, dodec_V2, dodec_V13, dodec_color);
+    trig_init(&trigs[34], dodec_V10, dodec_V13, dodec_V15, dodec_color);
+    trig_init(&trigs[36], dodec_V10, dodec_V15, dodec_V6, dodec_color);
+    // 10
+    trig_init(&trigs[37], dodec_V2, dodec_V16, dodec_V17, dodec_color);
+    trig_init(&trigs[38], dodec_V2, dodec_V17, dodec_V3, dodec_color);
+    trig_init(&trigs[39], dodec_V2, dodec_V3, dodec_V13, dodec_color);
+    // 11
+    trig_init(&trigs[40], dodec_V13, dodec_V3, dodec_V15, dodec_color);
+    trig_init(&trigs[41], dodec_V15, dodec_V13, dodec_V11, dodec_color);
+    trig_init(&trigs[42], dodec_V15, dodec_V1, dodec_V7, dodec_color);
+    // 12
+    trig_init(&trigs[43], dodec_V17, dodec_V1, dodec_V9, dodec_color);
+    trig_init(&trigs[44], dodec_V3, dodec_V17, dodec_V9, dodec_color);
+    trig_init(&trigs[45], dodec_V17, dodec_V11, dodec_V3, dodec_color);
 }
 
 void init_lights(Light *lights) {
@@ -324,7 +414,7 @@ void init_lights(Light *lights) {
     {
         Light pnt;
         pnt.type = LightType::POINT;
-        pnt.intensity = 0.8;
+        pnt.intensity = 0.2;
         pnt.position  = {-4.0, 4.0, 3};
         lights[1] = pnt;
     }
@@ -520,7 +610,7 @@ __host__ __device__ uchar4 ray(Rect *rects, int n_rects, Trig *trigs, int n_trig
 }
 
 template<>
-__host__ __device__ uchar4 ray<2>(Rect *rects, int n_rects, Trig *trigs, int n_trigs, Light *lights, int n_lights, double3 pos, double3 dir, int max_depth, uchar4 *floor_tex) {
+__host__ __device__ uchar4 ray<4>(Rect *rects, int n_rects, Trig *trigs, int n_trigs, Light *lights, int n_lights, double3 pos, double3 dir, int max_depth, uchar4 *floor_tex) {
     return {0, 0, 0, 255};
 }
 
@@ -624,7 +714,7 @@ int main(int argc, char const *argv[])
     int max_depth = 10;
     int n_rects = 1;
     Rect *rects = (Rect *) malloc(sizeof(Rect) * n_rects);
-    int n_trigs = 8;
+    int n_trigs = 46;
     Trig *trigs = (Trig *) malloc(sizeof(Trig) * n_trigs);
     int texW, texH;
    	FILE *fp = fopen("floor.data", "rb");
@@ -634,8 +724,7 @@ int main(int argc, char const *argv[])
     fread(floor_tex, sizeof(uchar4), texW * texH, fp);
     fclose(fp);
 
-    int cnt_lights_on_center = 1;
-    build_space(rects, trigs, floor_tex, texW, texH, cnt_lights_on_center);
+    build_space(rects, trigs, floor_tex, texW, texH);
     int n_lights = 3;
     Light *lights = (Light *) malloc(sizeof(Light) * n_lights);
     init_lights(lights);
