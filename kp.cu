@@ -9,6 +9,56 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
+__host__ __device__ double pow_bin(double base, double exp) {
+    if (exp == 0.0) return 1.0;
+    if (exp < 0.0) {
+        base = 1.0 / base;
+        exp = -exp;
+    }
+
+    double result = 1.0;
+    double current_base = base;
+    int integer_part = static_cast<int>(exp);
+
+    while (integer_part > 0) {
+        if (integer_part % 2 == 1) {
+            result *= current_base;
+        }
+        current_base *= current_base;
+        integer_part /= 2;
+    }
+
+    double fractional_part = exp - static_cast<int>(exp);
+    if (fractional_part > 0.0) {
+        double fractional_result = 1.0;
+        double precision = 1e-7;
+        double x = base;
+        for (int i = 0; i < 100; ++i) {
+            fractional_result *= 1.0 + fractional_part * (x - 1.0) / (i + 1);
+            if (x - fractional_result < precision) break;
+        }
+        result *= fractional_result;
+    }
+
+    return result;
+}
+
+__host__ __device__ double sqrt_custom(double x) {
+    if (x < 0.0) return -1.0;
+    if (x == 0.0) return 0.0;
+
+    double result = x;
+    double epsilon = 1e-7;
+    double previous_result = 0.0;
+
+    while (fabs(result - previous_result) > epsilon) {
+        previous_result = result;
+        result = 0.5 * (result + x / result);
+    }
+
+    return result;
+}
+
 #define CSC(call)                                                   \
 do {                                                                \
     cudaError_t res = call;                                         \
@@ -40,7 +90,7 @@ __host__ __device__ uchar4 operator+(uchar4 b, uchar4 a) {
 }
 
 __host__ __device__ bool is_near(double x, double eps = 1e-5) {
-    return std::fabs(x) < eps;
+    return fabs(x) < eps;
 }
 
 __host__ __device__ double dot(double3 a, double3 b) {
@@ -56,7 +106,7 @@ __host__ __device__ double3 prod(double3 a, double3 b) {
 }
 
 __host__ __device__ double3 norm(double3 v) {
-    double l = std::sqrt(dot(v, v));
+    double l = sqrt_custom(dot(v, v));
     if (l < 1e-12) return {0,0,0};
     return {v.x / l, v.y / l, v.z / l};
 }
@@ -94,24 +144,47 @@ __host__ __device__ double3 reflect(double3 R, double3 N) {
     return diff(tmp, R);
 }
 
-__host__ __device__ enum class LightType {
+__host__ __device__ double3 refract(const double3& ray_dir, double3& a_normal) 
+{
+    double3 res = {0, 0, 0};
+    double eta = 1.5;
+    double cos_theta = -dot(a_normal, ray_dir);
+
+    if (cos_theta < 0) {
+        cos_theta *= -1.0;
+        a_normal = prod_num(a_normal, -1.0);
+        eta = 1.0 / eta;
+    }
+    float k = 1.0 - eta*eta*(1.0-cos_theta*cos_theta);
+
+    if (k >= 0.0) {
+        double3 coef1 = prod_num(ray_dir, eta);
+        double3 coef2 = prod_num(a_normal, (eta * cos_theta - sqrt_custom(k)));
+        double3 coef_sum = add(coef1, coef2);
+        res = norm(coef_sum);
+    }
+
+    return res;
+}
+
+enum class LightType {
     AMBIENT,
     POINT
 };
 
-__host__ __device__ struct Light {
+struct Light {
     LightType type;
     double intensity;
     double3 position;
     double3 direction;
 };
 
-__host__ __device__ struct IntersectDto {
+struct IntersectDto {
     bool res = false;
     double tOut = 0.0;
 };
 
-__host__ __device__ struct Trig {
+struct Trig {
     double3 a, b, c;
     uchar4 color;
     double r = 0.0;
@@ -162,7 +235,7 @@ __host__ __device__ IntersectDto trig_intersect(Trig trig, double3 pos, const do
     double3 p  = prod(dir, e2);
     double div = dot(p, e1);
 
-    if (std::fabs(div) < 1e-12) {
+    if (fabs(div) < 1e-12) {
         ans.res = false;
         return ans;
     }
@@ -199,7 +272,7 @@ __host__ __device__ double3 trig_normal(Trig trig) {
     return norm(n);
 }
 
-__host__ __device__ struct Rect {
+struct Rect {
     double3 a, b, c, d;
 	int texW, texH;
     uchar4 color;
@@ -529,7 +602,7 @@ __host__ __device__ double compute_lighting(Rect *rects, int n_rects, Trig *trig
 
             double n_dot_l = dot(N, L);
             if (n_dot_l > 0.0) {
-                i += shadowT * light.intensity * n_dot_l / (std::sqrt(dot(N,N)) * std::sqrt(dot(L,L)));
+                i += shadowT * light.intensity * n_dot_l / (sqrt_custom(dot(N,N)) * sqrt_custom(dot(L,L)));
             }
 
             if (specular >= 0) {
@@ -537,7 +610,7 @@ __host__ __device__ double compute_lighting(Rect *rects, int n_rects, Trig *trig
                 double r_dot_v = dot(R, V);
                 if (r_dot_v > 0.0) {
                     i += shadowT * light.intensity 
-                         * std::pow(r_dot_v/(std::sqrt(dot(R,R))*std::sqrt(dot(V,V))), specular);
+                         * pow_bin(r_dot_v/(sqrt_custom(dot(R,R))*sqrt_custom(dot(V,V))), specular);
                 }
             }
         }
@@ -546,36 +619,13 @@ __host__ __device__ double compute_lighting(Rect *rects, int n_rects, Trig *trig
     return i;
 }
 
-__host__ __device__ double3 refract(const double3& ray_dir, double3& a_normal) 
-{
-    double3 res = {0, 0, 0};
-    double eta = 1.5;
-    double cos_theta = -dot(a_normal, ray_dir);
-
-    if (cos_theta < 0) {
-        cos_theta *= -1.0;
-        a_normal = prod_num(a_normal, -1.0);
-        eta = 1.0 / eta;
-    }
-    float k = 1.0 - eta*eta*(1.0-cos_theta*cos_theta);
-
-    if (k >= 0.0) {
-        double3 coef1 = prod_num(ray_dir, eta);
-        double3 coef2 = prod_num(a_normal, (eta * cos_theta - sqrt(k)));
-        double3 coef_sum = add(coef1, coef2);
-        res = norm(coef_sum);
-    }
-
-    return res;
-}
-
 template<int depth>
 __host__ __device__ uchar4 ray(Rect *rects, int n_rects, Trig *trigs, int n_trigs, Light *lights, int n_lights, double3 pos, double3 dir, int max_depth, uchar4 *floor_tex) {
     const double light_reps = 0.125;
     for (int k = 0; k < n_lights; k++) {
         if (lights[k].type == LightType::POINT) {
             double3 light_dir = diff(lights[k].position, pos);
-            double distance_to_light = std::sqrt(dot(light_dir, light_dir));
+            double distance_to_light = sqrt_custom(dot(light_dir, light_dir));
             light_dir = norm(light_dir);
             if (fabs(dot(light_dir, dir) - 1.0) < light_reps && distance_to_light < light_reps) {
                 return {255, 255, 255, 255};
@@ -642,7 +692,7 @@ __host__ __device__ uchar4 ray(Rect *rects, int n_rects, Trig *trigs, int n_trig
 
     uchar4 refracted_color = reflected_color;
     double3 refracted_dir = refract(dir, N);
-    if (std::sqrt(dot(refracted_dir, refracted_dir)) > 1e-6) {
+    if (sqrt_custom(dot(refracted_dir, refracted_dir)) > 1e-6) {
         refracted_color = ray<depth + 1>(rects, n_rects, trigs, n_trigs, lights,
                                          n_lights, P, refracted_dir, max_depth, floor_tex);
     }
@@ -663,6 +713,61 @@ __host__ __device__ uchar4 ray(Rect *rects, int n_rects, Trig *trigs, int n_trig
 template<>
 __host__ __device__ uchar4 ray<4>(Rect *rects, int n_rects, Trig *trigs, int n_trigs, Light *lights, int n_lights, double3 pos, double3 dir, int max_depth, uchar4 *floor_tex) {
     return {0, 0, 0, 255};
+}
+
+__global__ void render_kernel(Rect *rects, int n_rects, Trig *trigs, int n_trigs, Light *lights, int n_lights, double3 pc, double3 pv, int w, int h, double angle, uchar4 *data, int max_depth, uchar4 *floor_tex) {
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
+	int idy = blockDim.y * blockIdx.y + threadIdx.y;
+   	int offsetx = blockDim.x * gridDim.x;
+	int offsety = blockDim.y * gridDim.y;
+    int i, j;
+    
+    double dw = 2.0 / (w - 1.0);
+    double dh = 2.0 / (h - 1.0);
+    double z  = 1.0 / tan(angle * M_PI / 360.0);
+
+    double3 bz = norm(diff(pv, pc));
+    double3 bx = norm(prod(bz, {0.0, 0.0, 1.0}));
+    double3 by = norm(prod(bx, bz));
+    for (i = idy; i < w; i += offsety) {
+        for (j = idx; j < h; j += offsetx) {
+            double3 v = {
+                -1.0 + dw * i,
+                (-1.0 + dh * j) * (double)h / (double)w,
+                z
+            };
+            double3 dir = mult(bx, by, bz, v);
+            dir = norm(dir);
+            data[(h - 1 - j)*w + i] = ray<0>(
+                rects, n_rects, trigs, n_trigs, lights, n_lights, pc, dir, max_depth, floor_tex
+            );
+        }
+    }
+}
+
+void render(Rect *rects, int n_rects, Trig *trigs, int n_trigs, Light *lights, int n_lights, double3 pc, double3 pv, int w, int h, double angle, uchar4 *data, int max_depth, uchar4 *floor_tex) {
+    double dw = 2.0 / (w - 1.0);
+    double dh = 2.0 / (h - 1.0);
+    double z  = 1.0 / tan(angle * M_PI / 360.0);
+
+    double3 bz = norm(diff(pv, pc));
+    double3 bx = norm(prod(bz, {0.0, 0.0, 1.0}));
+    double3 by = norm(prod(bx, bz));
+
+    for (int i = 0; i < w; i++) {
+        for (int j = 0; j < h; j++) {
+            double3 v = {
+                -1.0 + dw * i,
+                (-1.0 + dh * j) * (double)h / (double)w,
+                z
+            };
+            double3 dir = mult(bx, by, bz, v);
+            dir = norm(dir);
+            data[(h - 1 - j)*w + i] = ray<0>(
+                rects, n_rects, trigs, n_trigs, lights, n_lights, pc, dir, max_depth, floor_tex
+            );
+        }
+    }
 }
 
 __host__ __device__ uchar4 ssaa_pixel(const uchar4* big_data, int bigW, int bigH, int x, int y, int k) {
@@ -702,61 +807,6 @@ __global__ void ssaa_kernel(uchar4 *big_data, uchar4 *small_data, int bigW, int 
     }
 }
 
-__global__ void render_kernel(Rect *rects, int n_rects, Trig *trigs, int n_trigs, Light *lights, int n_lights, double3 pc, double3 pv, int w, int h, double angle, uchar4 *data, int max_depth, uchar4 *floor_tex) {
-    int idx = blockDim.x * blockIdx.x + threadIdx.x;
-	int idy = blockDim.y * blockIdx.y + threadIdx.y;
-   	int offsetx = blockDim.x * gridDim.x;
-	int offsety = blockDim.y * gridDim.y;
-    int i, j;
-    
-    double dw = 2.0 / (w - 1.0);
-    double dh = 2.0 / (h - 1.0);
-    double z  = 1.0 / std::tan(angle * M_PI / 360.0);
-
-    double3 bz = norm(diff(pv, pc));
-    double3 bx = norm(prod(bz, {0.0, 0.0, 1.0}));
-    double3 by = norm(prod(bx, bz));
-    for (i = idy; i < w; i += offsety) {
-        for (j = idx; j < h; j += offsetx) {
-            double3 v = {
-                -1.0 + dw * i,
-                (-1.0 + dh * j) * (double)h / (double)w,
-                z
-            };
-            double3 dir = mult(bx, by, bz, v);
-            dir = norm(dir);
-            data[(h - 1 - j)*w + i] = ray<0>(
-                rects, n_rects, trigs, n_trigs, lights, n_lights, pc, dir, max_depth, floor_tex
-            );
-        }
-    }
-}
-
-void render(Rect *rects, int n_rects, Trig *trigs, int n_trigs, Light *lights, int n_lights, double3 pc, double3 pv, int w, int h, double angle, uchar4 *data, int max_depth, uchar4 *floor_tex) {
-    double dw = 2.0 / (w - 1.0);
-    double dh = 2.0 / (h - 1.0);
-    double z  = 1.0 / std::tan(angle * M_PI / 360.0);
-
-    double3 bz = norm(diff(pv, pc));
-    double3 bx = norm(prod(bz, {0.0, 0.0, 1.0}));
-    double3 by = norm(prod(bx, bz));
-
-    for (int i = 0; i < w; i++) {
-        for (int j = 0; j < h; j++) {
-            double3 v = {
-                -1.0 + dw * i,
-                (-1.0 + dh * j) * (double)h / (double)w,
-                z
-            };
-            double3 dir = mult(bx, by, bz, v);
-            dir = norm(dir);
-            data[(h - 1 - j)*w + i] = ray<0>(
-                rects, n_rects, trigs, n_trigs, lights, n_lights, pc, dir, max_depth, floor_tex
-            );
-        }
-    }
-}
-
 int main(int argc, char const *argv[])
 {
     int cuda = 1;
@@ -767,7 +817,7 @@ int main(int argc, char const *argv[])
             printf("300\n");
             printf("floor.data\n");
             printf("frames/frame%s.out\n", "%d");
-            printf("640 480 120\n");
+            printf("1280 720 120\n");
             printf("6.0 5.0 0.0 2.0 1.0 0.05 0.1 0.05 0.0 0.0\n");
             printf("3.0 0.0 3.1415926 1.5 0.5 0.03 0.07 0.02 0.0 0.0\n");
             printf("-2.5 2.5 2 0.9843 0.4745 0.0156 2.25 0.1 0.6\n");
@@ -975,10 +1025,10 @@ int main(int argc, char const *argv[])
             CSC(cudaEventRecord(stop, 0));
             CSC(cudaEventSynchronize(stop));
             CSC(cudaEventElapsedTime(&gpu_time, start, stop));
-            printf("%f %d\n", gpu_time, w * h);
+            printf("%f %d\n", gpu_time, w * h * k * k);
         } else {
             end_cpu = clock();
-            printf("%f %d\n", (double)((end_cpu - start_cpu) / 1000), w * h);
+            printf("%f %d\n", (double)((end_cpu - start_cpu) / 1000), w * h * k * k);
         }
     }
 
